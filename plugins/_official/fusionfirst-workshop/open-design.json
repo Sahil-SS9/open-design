@@ -1,0 +1,29 @@
+{
+  "name": "fusionfirst-workshop",
+  "version": "0.1.0",
+  "apiVersion": "v1",
+  "pluginId": "fusionfirst-workshop",
+  "displayName": "FusionFirst Workshop",
+  "description": "Warm dark + amber monochrome design system",
+  "category": "branding",
+  "tags": ["brand", "production-studio", "dark", "amber", "warm", "kensei"],
+  "designSystem": {
+    "id": "fusionfirst-workshop",
+    "path": "design-systems/fusionfirst-workshop"
+  },
+  "source": {
+    "type": "design-system",
+    "path": "design-systems/fusionfirst-workshop"
+  },
+  "preview": {
+    "type": "html",
+    "entry": "components.html"
+  },
+  "metadata": {
+    "sourceRepo": "https://github.com/nexu-io/open-design",
+    "sourcePath": "design-systems/fusionfirst-workshop",
+    "brandOrigin": "fusionfirststudio",
+    "brandOriginPath": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype-r/workshop",
+    "isolation": "opt-in"
+  }
+}

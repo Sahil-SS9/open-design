@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FusionFirst Workshop — Typography</title>
+  <style>
+:root {
+
+  --bg: #0A0807;
+  --surface: #16120E;
+  --surface-warm: var(--surface);
+  --fg: #F2EDE3;
+  --fg-2: #B5AB99;
+  --muted: #7A6F5E;
+  --meta: var(--muted);
+  --border: rgba(232, 160, 74, 0.08);
+  --border-soft: var(--border);
+  --accent: #E8A04A;
+  --accent-on: #0A0807;
+  --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+  --accent-active: color-mix(in oklab, var(--accent), black 14%);
+  --success: #5EBA82;
+  --warn: #f59e0b;
+  --danger: #EB5757;
+  --font-display: 'Space Grotesk', 'Inter', sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 36px;
+  --text-3xl: 54px;
+  --text-4xl: 76px;
+  --leading-body: 1.6;
+  --leading-tight: 1.06;
+  --tracking-display: -0.02em;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 64px;
+  --space-12: 96px;
+  --space-20: 128px;
+  --section-y-desktop: 96px;
+  --section-y-tablet: 64px;
+  --section-y-phone: 32px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-pill: 9999px;
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 4px 12px rgba(10, 8, 7, 0.3);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --container-max: 1200px;
+  --container-gutter-desktop: 36px;
+  --container-gutter-tablet: 24px;
+  --container-gutter-phone: 16px;
+  --amber: #E8A04A;
+  --amber-deep: #B8762C;
+  --amber-soft: #F4C589;
+  --amber-glow: rgba(232, 160, 74, 0.35);
+  --amber-wash: rgba(232, 160, 74, 0.08);
+  --signal-green: #5EBA82;
+  --signal-red: #EB5757;
+  --signal-blue: #6F8FE8;
+  --text-paper: #1A1612;
+  --text-paper-soft: #4D4538;
+  --line-paper: rgba(26, 22, 18, 0.12);
+  --bg-paper: #F5F0E6;
+  --bg-paper-soft: #EBE4D5;
+}
+
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-4); }
+  </style>
+</head>
+<body>
+  <h1 style="font-family: var(--font-display); font-size: var(--text-4xl); line-height: var(--leading-tight); letter-spacing: var(--tracking-display); margin-bottom: var(--space-4);">Display — 76px</h1>
+  <h2 style="font-family: var(--font-display); font-size: var(--text-3xl); line-height: var(--leading-tight); margin-bottom: var(--space-3);">Headline — 54px</h2>
+  <h3 style="font-family: var(--font-display); font-size: var(--text-2xl); line-height: var(--leading-tight); margin-bottom: var(--space-3);">Section Title — 36px</h3>
+  <h4 style="font-family: var(--font-display); font-size: var(--text-xl); line-height: var(--leading-tight); margin-bottom: var(--space-2);">H2 — 24px</h4>
+  <p style="font-size: var(--text-base); line-height: var(--leading-body); margin-bottom: var(--space-4);">Body — 16px. The quick brown fox jumps over the lazy dog.</p>
+  <p style="font-size: var(--text-sm); line-height: var(--leading-body); margin-bottom: var(--space-2);">Caption — 14px. The quick brown fox jumps over the lazy dog.</p>
+  <p style="font-family: var(--font-mono); font-size: var(--text-base); margin-bottom: var(--space-4);">Code — 16px monospace. console.log("hello world");</p>
+</body>
+</html>

@@ -108,3 +108,5 @@ deploy/agent-bins/
 # Local agent worktrees (must stay git-ignored so pnpm guard does not scan them)
 .slim/worktrees/
 .slim/worktrees.json
+skills/claude-skill-web-clone/
+skills/scroll-world/

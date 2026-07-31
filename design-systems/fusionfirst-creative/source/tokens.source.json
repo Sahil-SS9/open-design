@@ -1,0 +1,253 @@
+{
+  "source": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype",
+  "tokens": {
+    "--bg": {
+      "value": "#0A0A0B",
+      "line": 6
+    },
+    "--surface": {
+      "value": "#18181D",
+      "line": 7
+    },
+    "--surface-warm": {
+      "value": "var(--surface)",
+      "line": 8
+    },
+    "--fg": {
+      "value": "#F5F5F0",
+      "line": 9
+    },
+    "--fg-2": {
+      "value": "#A8A8A8",
+      "line": 10
+    },
+    "--muted": {
+      "value": "#6B6B72",
+      "line": 11
+    },
+    "--meta": {
+      "value": "var(--muted)",
+      "line": 12
+    },
+    "--border": {
+      "value": "#2A2A33",
+      "line": 13
+    },
+    "--border-soft": {
+      "value": "var(--border)",
+      "line": 14
+    },
+    "--accent": {
+      "value": "#FF5722",
+      "line": 15
+    },
+    "--accent-on": {
+      "value": "#0A0A0B",
+      "line": 16
+    },
+    "--accent-hover": {
+      "value": "color-mix(in oklab, var(--accent), black 8%)",
+      "line": 17
+    },
+    "--accent-active": {
+      "value": "color-mix(in oklab, var(--accent), black 14%)",
+      "line": 18
+    },
+    "--success": {
+      "value": "#5EBA82",
+      "line": 19
+    },
+    "--warn": {
+      "value": "#f59e0b",
+      "line": 20
+    },
+    "--danger": {
+      "value": "#FF3366",
+      "line": 21
+    },
+    "--font-display": {
+      "value": "'Inter Tight', 'Inter', -apple-system, system-ui, sans-serif",
+      "line": 22
+    },
+    "--font-body": {
+      "value": "'Inter', -apple-system, system-ui, sans-serif",
+      "line": 23
+    },
+    "--font-mono": {
+      "value": "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace",
+      "line": 24
+    },
+    "--text-xs": {
+      "value": "12px",
+      "line": 25
+    },
+    "--text-sm": {
+      "value": "14px",
+      "line": 26
+    },
+    "--text-base": {
+      "value": "16px",
+      "line": 27
+    },
+    "--text-lg": {
+      "value": "18px",
+      "line": 28
+    },
+    "--text-xl": {
+      "value": "24px",
+      "line": 29
+    },
+    "--text-2xl": {
+      "value": "32px",
+      "line": 30
+    },
+    "--text-3xl": {
+      "value": "48px",
+      "line": 31
+    },
+    "--text-4xl": {
+      "value": "72px",
+      "line": 32
+    },
+    "--leading-body": {
+      "value": "1.6",
+      "line": 33
+    },
+    "--leading-tight": {
+      "value": "1.1",
+      "line": 34
+    },
+    "--tracking-display": {
+      "value": "-0.02em",
+      "line": 35
+    },
+    "--space-1": {
+      "value": "4px",
+      "line": 36
+    },
+    "--space-2": {
+      "value": "8px",
+      "line": 37
+    },
+    "--space-3": {
+      "value": "16px",
+      "line": 38
+    },
+    "--space-4": {
+      "value": "24px",
+      "line": 39
+    },
+    "--space-5": {
+      "value": "32px",
+      "line": 40
+    },
+    "--space-6": {
+      "value": "48px",
+      "line": 41
+    },
+    "--space-8": {
+      "value": "96px",
+      "line": 42
+    },
+    "--space-12": {
+      "value": "128px",
+      "line": 43
+    },
+    "--space-20": {
+      "value": "192px",
+      "line": 44
+    },
+    "--section-y-desktop": {
+      "value": "96px",
+      "line": 45
+    },
+    "--section-y-tablet": {
+      "value": "64px",
+      "line": 46
+    },
+    "--section-y-phone": {
+      "value": "32px",
+      "line": 47
+    },
+    "--radius-sm": {
+      "value": "4px",
+      "line": 48
+    },
+    "--radius-md": {
+      "value": "8px",
+      "line": 49
+    },
+    "--radius-lg": {
+      "value": "16px",
+      "line": 50
+    },
+    "--radius-pill": {
+      "value": "999px",
+      "line": 51
+    },
+    "--elev-flat": {
+      "value": "none",
+      "line": 52
+    },
+    "--elev-ring": {
+      "value": "0 0 0 1px var(--border)",
+      "line": 53
+    },
+    "--elev-raised": {
+      "value": "0 4px 12px rgba(10, 10, 11, 0.4)",
+      "line": 54
+    },
+    "--focus-ring": {
+      "value": "0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%)",
+      "line": 55
+    },
+    "--motion-fast": {
+      "value": "150ms",
+      "line": 56
+    },
+    "--motion-base": {
+      "value": "300ms",
+      "line": 57
+    },
+    "--ease-standard": {
+      "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "line": 58
+    },
+    "--container-max": {
+      "value": "1200px",
+      "line": 59
+    },
+    "--container-gutter-desktop": {
+      "value": "36px",
+      "line": 60
+    },
+    "--container-gutter-tablet": {
+      "value": "24px",
+      "line": 61
+    },
+    "--container-gutter-phone": {
+      "value": "16px",
+      "line": 62
+    },
+    "--heat": {
+      "value": "#FF5722",
+      "line": 63
+    },
+    "--fusion": {
+      "value": "#FFB627",
+      "line": 64
+    },
+    "--plasma": {
+      "value": "#00E5FF",
+      "line": 65
+    },
+    "--ember": {
+      "value": "#FF3366",
+      "line": 66
+    },
+    "--text-on-heat": {
+      "value": "#0A0A0B",
+      "line": 67
+    }
+  }
+}

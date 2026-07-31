@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FusionFirst Flagship — Spacing</title>
+  <style>
+:root {
+
+  --bg: #0A0807;
+  --surface: #16120E;
+  --surface-warm: #F5F0E6;
+  --fg: #F2EDE3;
+  --fg-2: #B5AB99;
+  --muted: #7A6F5E;
+  --meta: #5EBA82;
+  --border: rgba(232, 160, 74, 0.08);
+  --border-soft: rgba(26, 22, 18, 0.12);
+  --accent: #E8A04A;
+  --accent-on: #0A0807;
+  --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+  --accent-active: color-mix(in oklab, var(--accent), black 14%);
+  --success: #5EBA82;
+  --warn: #f59e0b;
+  --danger: #EB5757;
+  --font-display: 'Space Grotesk', 'Inter', sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 40px;
+  --text-3xl: 64px;
+  --text-4xl: clamp(56px, 9vw, 144px);
+  --leading-body: 1.6;
+  --leading-tight: 1.06;
+  --tracking-display: -0.02em;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 64px;
+  --space-12: 96px;
+  --space-20: 128px;
+  --section-y-desktop: 128px;
+  --section-y-tablet: 80px;
+  --section-y-phone: 48px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 20px 52px rgba(10, 8, 7, 0.3);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+  --motion-fast: 200ms;
+  --motion-base: 400ms;
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --container-max: 1200px;
+  --container-gutter-desktop: 36px;
+  --container-gutter-tablet: 24px;
+  --container-gutter-phone: 16px;
+  --amber: #E8A04A;
+  --amber-deep: #B8762C;
+  --amber-soft: #F4C589;
+  --amber-glow: rgba(232, 160, 74, 0.35);
+  --amber-wash: rgba(232, 160, 74, 0.08);
+  --signal-green: #5EBA82;
+  --signal-red: #EB5757;
+  --signal-blue: #6F8FE8;
+  --text-paper: #1A1612;
+  --text-paper-soft: #4D4538;
+  --line-paper: rgba(26, 22, 18, 0.12);
+  --bg-paper: #F5F0E6;
+  --bg-paper-soft: #EBE4D5;
+}
+
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-4); }
+    .row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .bar { height: 8px; background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1 style="font-size: var(--text-base); margin-bottom: var(--space-4);">FusionFirst Flagship Spacing Scale</h1>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-1</span><div class="bar" style="width: var(--space-1);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-2</span><div class="bar" style="width: var(--space-2);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-3</span><div class="bar" style="width: var(--space-3);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-4</span><div class="bar" style="width: var(--space-4);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-5</span><div class="bar" style="width: var(--space-5);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-6</span><div class="bar" style="width: var(--space-6);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-8</span><div class="bar" style="width: var(--space-8);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-12</span><div class="bar" style="width: var(--space-12);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-20</span><div class="bar" style="width: var(--space-20);"></div></div>
+</body>
+</html>

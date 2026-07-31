@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HydraSkale — AI-Optimized Infrastructure</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    /* HydraSkale Design System — teal (#00C896) + burnt orange (#FF4F00) + warm cream (#F0EBDF) */
+    :root {
+      --bg: #F0EBDF;
+      --surface: #FFFFFF;
+      --fg: #0A0A09;
+      --muted: #5C5C5C;
+      --border: #D1CDC7;
+      --accent: #00C896;
+      --accent-ink: #0A0A09;
+      --meta: #FF4F00;
+      --surface-warm: #F8F4EB;
+      --fg-2: #5C5C5C;
+      --border-soft: #E0DED9;
+      --radius-sm: 4px;
+      --radius-lg: 8px;
+      --radius-pill: 9999px;
+      --font-display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 18px;
+      --text-xl: 20px;
+      --text-2xl: 24px;
+      --text-3xl: 42px;
+      --text-4xl: 64px;
+      --leading-body: 1.5;
+      --leading-tight: 1.1;
+      --tracking-display: -0.02em;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --space-8: 64px;
+      --space-9: 80px;
+      --space-12: 128px;
+      --section-y-desktop: 80px;
+      --section-y-tablet: 64px;
+      --section-y-phone: 32px;
+      --container-max: 1200px;
+      --container-gutter-desktop: 36px;
+      --container-gutter-tablet: 24px;
+      --container-gutter-phone: 16px;
+      --elev-flat: none;
+      --elev-ring: 0 0 0 1px var(--border);
+      --elev-raised: 0 4px 6px -1px rgba(10, 10, 9, 0.1), 0 2px 4px -1px rgba(10, 10, 9, 0.06);
+      --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+      --motion-fast: 150ms;
+      --motion-base: 250ms;
+      --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--fg);
+      line-height: var(--leading-body);
+      font-size: var(--text-base);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Layout */
+    .container {
+      max-width: var(--container-max);
+      margin: 0 auto;
+      padding: 0 var(--container-gutter-desktop);
+    }
+
+    /* Header / Nav */
+    header {
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      box-shadow: var(--elev-flat);
+      z-index: 100;
+    }
+
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: var(--section-y-desktop);
+    }
+
+    .logo {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: var(--text-xl);
+      color: var(--fg);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .logo-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: var(--radius-pill);
+      background: var(--accent);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: var(--space-6);
+    }
+
+    .nav-link {
+      font-size: var(--text-sm);
+      font-weight: 500;
+      color: var(--fg);
+      text-decoration: none;
+      transition: color var(--motion-fast) var(--ease-standard);
+    }
+
+    .nav-link:hover { color: var(--accent); }
+
+    /* Hero Section */
+    .hero {
+      padding: var(--section-y-desktop) 0;
+      text-align: center;
+    }
+
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: var(--text-4xl);
+      line-height: var(--leading-tight);
+      letter-spacing: var(--tracking-display);
+      margin-bottom: var(--space-5);
+      max-width: 48rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .hero-subtitle {
+      font-size: var(--text-lg);
+      color: var(--muted);
+      max-width: 36rem;
+      margin-left: auto;
+      margin-right: auto;
+      margin-bottom: var(--space-7);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      font-weight: 500;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: var(--space-3) var(--space-6);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background-color var(--motion-base) var(--ease-standard),
+                  transform 100ms ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .btn-primary:hover { background: color-mix(in oklab, var(--accent), black 8%); }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--surface-warm); }
+
+    /* Sections */
+    section { padding: var(--section-y-desktop) 0; }
+    .section-title {
+      font-family: var(--font-display);
+      font-size: var(--text-3xl);
+      line-height: var(--leading-tight);
+      margin-bottom: var(--space-6);
+      text-align: center;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--muted);
+      margin-bottom: var(--space-7);
+      max-width: 42rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: var(--space-6);
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: var(--space-6);
+      box-shadow: var(--elev-flat);
+      transition: box-shadow var(--motion-base) var(--ease-standard);
+    }
+    .card:hover { box-shadow: var(--elev-raised); }
+    .card-title {
+      font-family: var(--font-display);
+      font-size: var(--text-xl);
+      margin-bottom: var(--space-3);
+    }
+    .card-body { color: var(--muted); font-size: var(--text-sm); }
+
+    /* Accent badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      font-size: var(--text-xs);
+      font-weight: 600;
+      border-radius: var(--radius-pill);
+      padding: var(--space-1) var(--space-3);
+      line-height: 1;
+    }
+    .badge-teal { background: color-mix(in oklab, var(--accent), white 85%); color: var(--accent); }
+    .badge-orange { background: color-mix(in oklab, var(--meta), white 85%); color: var(--meta); }
+
+    /* Feature list */
+    .feature-list { display: flex; flex-direction: column; gap: var(--space-5); }
+    .feature-item {
+      display: flex;
+      gap: var(--space-4);
+      align-items: flex-start;
+    }
+    .feature-icon {
+      font-size: var(--text-2xl);
+      flex-shrink: 0;
+    }
+    .feature-text h4 {
+      font-family: var(--font-display);
+      font-size: var(--text-lg);
+      margin-bottom: var(--space-2);
+    }
+
+    /* Footer */
+    footer {
+      background: var(--fg);
+      color: var(--bg);
+      padding: var(--space-9) 0 var(--space-6);
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: var(--space-7);
+      margin-bottom: var(--space-7);
+    }
+    .footer-col h4 {
+      font-family: var(--font-display);
+      font-size: var(--text-sm);
+      margin-bottom: var(--space-3);
+    }
+    .footer-col ul { list-style: none; }
+    .footer-col li { margin-bottom: var(--space-2); }
+    .footer-col a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: var(--text-sm);
+    }
+    .footer-col a:hover { color: var(--accent); }
+    .footer-bottom {
+      border-top: 1px solid var(--border-soft);
+      padding-top: var(--space-4);
+      text-align: center;
+      font-size: var(--text-xs);
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <nav class="nav-inner">
+        <a href="#" class="logo"><span class="logo-dot"></span> HydraSkale</a>
+        <div class="nav-links">
+          <a href="#features" class="nav-link">Features</a>
+          <a href="#pricing" class="nav-link">Pricing</a>
+          <a href="#docs" class="nav-link">Docs</a>
+          <a href="#cta" class="nav-link">Get Started</a>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1 class="hero-title">AI-Optimized Infrastructure for the Modern Web</h1>
+        <p class="hero-subtitle">Build, deploy, and scale with intelligent infrastructure that learns from your usage patterns and automatically optimizes for performance and cost.</p>
+        <a href="#cta" class="btn btn-primary">Get Started Free</a>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="container">
+        <h2 class="section-title">Intelligent Infrastructure</h2>
+        <p class="section-subtitle">Everything you need to build AI-native applications at scale, with automatic optimization and zero-downtime deployments.</p>
+        <div class="grid-2">
+          <div class="card">
+            <span class="badge badge-teal">Compute</span>
+            <h3 class="card-title">Auto-Scaling Compute</h3>
+            <p class="card-body">Dynamically scales compute resources based on real-time demand, with predictive scaling that anticipates traffic spikes before they happen.</p>
+          </div>
+          <div class="card">
+            <span class="badge badge-orange">Storage</span>
+            <h3 class="card-title">Smart Storage</h3>
+            <p class="card-body">Tiered storage automatically moves data between hot, warm, and cold storage based on access patterns, cutting costs by up to 70%.</p>
+          </div>
+          <div class="card">
+            <span class="badge badge-teal">AI</span>
+            <h3 class="card-title">AI-Native Runtime</h3>
+            <p class="card-body">Built-in ML inference at the edge. Run models closer to your users with automatic GPU allocation and model caching.</p>
+          </div>
+          <div class="card">
+            <span class="badge badge-orange">Network</span>
+            <h3 class="card-title">Global CDN</h3>
+            <p class="card-body">200+ edge locations worldwide with intelligent routing that picks the fastest path for every request, every time.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <h2 class="section-title">How It Works</h2>
+        <p class="section-subtitle">Three simple steps to production-grade infrastructure that thinks for itself.</p>
+        <div class="grid-2">
+          <div class="feature-list">
+            <div class="feature-item">
+              <span class="feature-icon">1</span>
+              <div class="feature-text">
+                <h4>Deploy</h4>
+                <p style="color: var(--muted); font-size: var(--text-sm);">Connect your repo and deploy with a single command. We handle the build, test, and staging pipeline automatically.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <span class="feature-icon">2</span>
+              <div class="feature-text">
+                <h4>Optimize</h4>
+                <p style="color: var(--muted); font-size: var(--text-sm);">Our AI continuously monitors your traffic and automatically tunes resources, routing, and caching for performance and cost.</p>
+              </div>
+            </div>
+            <div class="feature-item">
+              <span class="feature-icon">3</span>
+              <div class="feature-text">
+                <h4>Scale</h4>
+                <p style="color: var(--muted); font-size: var(--text-sm);">Grow from zero to millions of requests with zero configuration changes. The system adapts to your load automatically.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cta" style="background: var(--surface-warm);">
+      <div class="container" style="text-align: center;">
+        <h2 class="section-title">Ready to get started?</h2>
+        <p class="section-subtitle">Join thousands of teams already running on HydraSkale. Start your free trial today — no credit card required.</p>
+        <a href="#" class="btn btn-primary">Start Free Trial</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col">
+          <h4>HydraSkale</h4>
+          <ul>
+            <li><a href="#">About</a></li>
+            <li><a href="#">Careers</a></li>
+            <li><a href="#">Blog</a></li>
+            <li><a href="#">Press</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#">Compute</a></li>
+            <li><a href="#">Storage</a></li>
+            <li><a href="#">AI Runtime</a></li>
+            <li><a href="#">CDN</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Company</h4>
+          <ul>
+            <li><a href="#docs">Docs</a></li>
+            <li><a href="#">API</a></li>
+            <li><a href="#">Support</a></li>
+            <li><a href="#">Contact</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>Legal</h4>
+          <ul>
+            <li><a href="#">Privacy</a></li>
+            <li><a href="#">Terms</a></li>
+            <li><a href="#">Security</a></li>
+            <li><a href="#">Cookies</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        © 2026 HydraSkale. All rights reserved.
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

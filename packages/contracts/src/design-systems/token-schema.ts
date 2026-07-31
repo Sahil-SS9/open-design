@@ -239,6 +239,53 @@ export const BRAND_EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
     "--tm-code-panel", // #151a1d code window header
     "--tm-code-text", // #d8dee9 code syntax text
   ],
+  hydraskale: [
+    "--space-20", // 80px — section gap twin, matches HydraSkale's 80px section-y-desktop
+    "--primary", // alias to --accent (HydraSkale legacy naming for teal)
+    "--primary-ink", // text on primary background
+    "--accent-ink", // text on burnt orange accent
+    "--link", // link colour — teal dark variant
+  ],
+  "fusionfirst-workshop": [
+    "--space-20", // 128px — section gap twin
+    "--amber", // amber colour token
+    "--amber-deep", // darker amber variant
+    "--amber-soft", // softer amber variant
+    "--amber-glow", // amber glow shadow
+    "--amber-wash", // amber wash background
+    "--signal-green", // green signal colour
+    "--signal-red", // red signal colour
+    "--signal-blue", // blue signal colour
+    "--text-paper", // text on paper surface
+    "--text-paper-soft", // soft text on paper
+    "--line-paper", // paper surface line
+    "--bg-paper", // paper surface background
+    "--bg-paper-soft", // soft paper surface
+  ],
+  "fusionfirst-creative": [
+    "--space-20", // 192px — section gap twin
+    "--heat", // molten orange primary
+    "--fusion", // glowing yellow-orange
+    "--plasma", // electric cyan
+    "--ember", // deep red
+    "--text-on-heat", // text on heat background
+  ],
+  "fusionfirst-flagship": [
+    "--space-20", // 128px — section gap twin
+    "--amber", // amber colour token
+    "--amber-deep", // darker amber variant
+    "--amber-soft", // softer amber variant
+    "--amber-glow", // amber glow shadow
+    "--amber-wash", // amber wash background
+    "--signal-green", // green signal colour
+    "--signal-red", // red signal colour
+    "--signal-blue", // blue signal colour
+    "--text-paper", // text on paper surface
+    "--text-paper-soft", // soft text on paper
+    "--line-paper", // paper surface line
+    "--bg-paper", // paper surface background
+    "--bg-paper-soft", // soft paper surface
+  ],
 };
 
 /**

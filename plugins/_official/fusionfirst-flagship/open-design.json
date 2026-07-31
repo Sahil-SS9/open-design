@@ -1,0 +1,29 @@
+{
+  "name": "fusionfirst-flagship",
+  "version": "0.1.0",
+  "apiVersion": "v1",
+  "pluginId": "fusionfirst-flagship",
+  "displayName": "FusionFirst Flagship",
+  "description": "Layered workshop dark with amber and signals. Editorial + data-dense.",
+  "category": "branding",
+  "tags": ["brand", "production-studio", "dark", "editorial", "data-dense", "signals", "kensei"],
+  "designSystem": {
+    "id": "fusionfirst-flagship",
+    "path": "design-systems/fusionfirst-flagship"
+  },
+  "source": {
+    "type": "design-system",
+    "path": "design-systems/fusionfirst-flagship"
+  },
+  "preview": {
+    "type": "html",
+    "entry": "components.html"
+  },
+  "metadata": {
+    "sourceRepo": "https://github.com/nexu-io/open-design",
+    "sourcePath": "design-systems/fusionfirst-flagship",
+    "brandOrigin": "fusionfirststudio",
+    "brandOriginPath": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype-flagship",
+    "isolation": "opt-in"
+  }
+}

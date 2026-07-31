@@ -1,0 +1,285 @@
+{
+  "source": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype-flagship",
+  "tokens": {
+    "--bg": {
+      "value": "#0A0807",
+      "line": 6
+    },
+    "--surface": {
+      "value": "#16120E",
+      "line": 7
+    },
+    "--surface-warm": {
+      "value": "#F5F0E6",
+      "line": 8
+    },
+    "--fg": {
+      "value": "#F2EDE3",
+      "line": 9
+    },
+    "--fg-2": {
+      "value": "#B5AB99",
+      "line": 10
+    },
+    "--muted": {
+      "value": "#7A6F5E",
+      "line": 11
+    },
+    "--meta": {
+      "value": "#5EBA82",
+      "line": 12
+    },
+    "--border": {
+      "value": "rgba(232, 160, 74, 0.08)",
+      "line": 13
+    },
+    "--border-soft": {
+      "value": "rgba(26, 22, 18, 0.12)",
+      "line": 14
+    },
+    "--accent": {
+      "value": "#E8A04A",
+      "line": 15
+    },
+    "--accent-on": {
+      "value": "#0A0807",
+      "line": 16
+    },
+    "--accent-hover": {
+      "value": "color-mix(in oklab, var(--accent), black 8%)",
+      "line": 17
+    },
+    "--accent-active": {
+      "value": "color-mix(in oklab, var(--accent), black 14%)",
+      "line": 18
+    },
+    "--success": {
+      "value": "#5EBA82",
+      "line": 19
+    },
+    "--warn": {
+      "value": "#f59e0b",
+      "line": 20
+    },
+    "--danger": {
+      "value": "#EB5757",
+      "line": 21
+    },
+    "--font-display": {
+      "value": "'Space Grotesk', 'Inter', sans-serif",
+      "line": 22
+    },
+    "--font-body": {
+      "value": "'Inter', system-ui, sans-serif",
+      "line": 23
+    },
+    "--font-mono": {
+      "value": "'JetBrains Mono', ui-monospace, monospace",
+      "line": 24
+    },
+    "--text-xs": {
+      "value": "10px",
+      "line": 25
+    },
+    "--text-sm": {
+      "value": "11px",
+      "line": 26
+    },
+    "--text-base": {
+      "value": "16px",
+      "line": 27
+    },
+    "--text-lg": {
+      "value": "18px",
+      "line": 28
+    },
+    "--text-xl": {
+      "value": "24px",
+      "line": 29
+    },
+    "--text-2xl": {
+      "value": "40px",
+      "line": 30
+    },
+    "--text-3xl": {
+      "value": "64px",
+      "line": 31
+    },
+    "--text-4xl": {
+      "value": "clamp(56px, 9vw, 144px)",
+      "line": 32
+    },
+    "--leading-body": {
+      "value": "1.6",
+      "line": 33
+    },
+    "--leading-tight": {
+      "value": "1.06",
+      "line": 34
+    },
+    "--tracking-display": {
+      "value": "-0.02em",
+      "line": 35
+    },
+    "--space-1": {
+      "value": "4px",
+      "line": 36
+    },
+    "--space-2": {
+      "value": "8px",
+      "line": 37
+    },
+    "--space-3": {
+      "value": "12px",
+      "line": 38
+    },
+    "--space-4": {
+      "value": "16px",
+      "line": 39
+    },
+    "--space-5": {
+      "value": "24px",
+      "line": 40
+    },
+    "--space-6": {
+      "value": "32px",
+      "line": 41
+    },
+    "--space-8": {
+      "value": "64px",
+      "line": 42
+    },
+    "--space-12": {
+      "value": "96px",
+      "line": 43
+    },
+    "--space-20": {
+      "value": "128px",
+      "line": 44
+    },
+    "--section-y-desktop": {
+      "value": "128px",
+      "line": 45
+    },
+    "--section-y-tablet": {
+      "value": "80px",
+      "line": 46
+    },
+    "--section-y-phone": {
+      "value": "48px",
+      "line": 47
+    },
+    "--radius-sm": {
+      "value": "4px",
+      "line": 48
+    },
+    "--radius-md": {
+      "value": "8px",
+      "line": 49
+    },
+    "--radius-lg": {
+      "value": "16px",
+      "line": 50
+    },
+    "--radius-pill": {
+      "value": "9999px",
+      "line": 51
+    },
+    "--elev-flat": {
+      "value": "none",
+      "line": 52
+    },
+    "--elev-ring": {
+      "value": "0 0 0 1px var(--border)",
+      "line": 53
+    },
+    "--elev-raised": {
+      "value": "0 20px 52px rgba(10, 8, 7, 0.3)",
+      "line": 54
+    },
+    "--focus-ring": {
+      "value": "0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%)",
+      "line": 55
+    },
+    "--motion-fast": {
+      "value": "200ms",
+      "line": 56
+    },
+    "--motion-base": {
+      "value": "400ms",
+      "line": 57
+    },
+    "--ease-standard": {
+      "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "line": 58
+    },
+    "--container-max": {
+      "value": "1200px",
+      "line": 59
+    },
+    "--container-gutter-desktop": {
+      "value": "36px",
+      "line": 60
+    },
+    "--container-gutter-tablet": {
+      "value": "24px",
+      "line": 61
+    },
+    "--container-gutter-phone": {
+      "value": "16px",
+      "line": 62
+    },
+    "--amber": {
+      "value": "#E8A04A",
+      "line": 63
+    },
+    "--amber-deep": {
+      "value": "#B8762C",
+      "line": 64
+    },
+    "--amber-soft": {
+      "value": "#F4C589",
+      "line": 65
+    },
+    "--amber-glow": {
+      "value": "rgba(232, 160, 74, 0.35)",
+      "line": 66
+    },
+    "--amber-wash": {
+      "value": "rgba(232, 160, 74, 0.08)",
+      "line": 67
+    },
+    "--signal-green": {
+      "value": "#5EBA82",
+      "line": 68
+    },
+    "--signal-red": {
+      "value": "#EB5757",
+      "line": 69
+    },
+    "--signal-blue": {
+      "value": "#6F8FE8",
+      "line": 70
+    },
+    "--text-paper": {
+      "value": "#1A1612",
+      "line": 71
+    },
+    "--text-paper-soft": {
+      "value": "#4D4538",
+      "line": 72
+    },
+    "--line-paper": {
+      "value": "rgba(26, 22, 18, 0.12)",
+      "line": 73
+    },
+    "--bg-paper": {
+      "value": "#F5F0E6",
+      "line": 74
+    },
+    "--bg-paper-soft": {
+      "value": "#EBE4D5",
+      "line": 75
+    }
+  }
+}

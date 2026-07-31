@@ -1,0 +1,29 @@
+{
+  "name": "fusionfirst-creative",
+  "version": "0.1.0",
+  "apiVersion": "v1",
+  "pluginId": "fusionfirst-creative",
+  "displayName": "FusionFirst Creative",
+  "description": "Warm dark with molten orange, electric cyan, and deep red. Terminal-adjacent.",
+  "category": "branding",
+  "tags": ["brand", "production-studio", "dark", "neon", "terminal", "kensei"],
+  "designSystem": {
+    "id": "fusionfirst-creative",
+    "path": "design-systems/fusionfirst-creative"
+  },
+  "source": {
+    "type": "design-system",
+    "path": "design-systems/fusionfirst-creative"
+  },
+  "preview": {
+    "type": "html",
+    "entry": "components.html"
+  },
+  "metadata": {
+    "sourceRepo": "https://github.com/nexu-io/open-design",
+    "sourcePath": "design-systems/fusionfirst-creative",
+    "brandOrigin": "fusionfirststudio",
+    "brandOriginPath": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype",
+    "isolation": "opt-in"
+  }
+}

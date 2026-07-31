@@ -1,0 +1,801 @@
+{
+  "schemaVersion": 1,
+  "contract": "TOKEN_SCHEMA",
+  "generatedAt": "2026-07-31T02:30:00.000Z",
+  "sourceScope": "/home/kensei/kensei-staging/fusionfirststudios-site/prototype-flagship",
+  "summary": {
+    "totalTokens": 70,
+    "declaredTokens": 70,
+    "sourceBackedTokens": 70,
+    "sourceBackedA1": 26,
+    "fallbackTokens": 26,
+    "aliasTokens": 4,
+    "layerCounts": {
+      "A1-identity": 8,
+      "A1-structure": 18,
+      "A2": 26,
+      "B-slot": 4
+    },
+    "score": 100,
+    "grade": "excellent",
+    "recommendRebuild": false
+  },
+  "bindings": {
+    "tokensCss": "tokens.css",
+    "designTokensJson": "design-tokens.json",
+    "componentsHtml": "components.html",
+    "componentsManifest": "components.manifest.json"
+  },
+  "tokens": [
+    {
+      "name": "--bg",
+      "layer": "A1-identity",
+      "value": "#0A0807",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --bg",
+      "sources": [
+        "tokens.css:6"
+      ],
+      "sourceName": "--bg"
+    },
+    {
+      "name": "--surface",
+      "layer": "A1-identity",
+      "value": "#16120E",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --surface",
+      "sources": [
+        "tokens.css:7"
+      ],
+      "sourceName": "--surface"
+    },
+    {
+      "name": "--surface-warm",
+      "layer": "B-slot",
+      "value": "#F5F0E6",
+      "confidence": "high",
+      "reason": "B-slot alias — --surface-warm",
+      "sources": [
+        "tokens.css:8"
+      ],
+      "sourceName": "--surface-warm"
+    },
+    {
+      "name": "--fg",
+      "layer": "A1-identity",
+      "value": "#F2EDE3",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --fg",
+      "sources": [
+        "tokens.css:9"
+      ],
+      "sourceName": "--fg"
+    },
+    {
+      "name": "--fg-2",
+      "layer": "B-slot",
+      "value": "#B5AB99",
+      "confidence": "high",
+      "reason": "B-slot alias — --fg-2",
+      "sources": [
+        "tokens.css:10"
+      ],
+      "sourceName": "--fg-2"
+    },
+    {
+      "name": "--muted",
+      "layer": "A1-identity",
+      "value": "#7A6F5E",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --muted",
+      "sources": [
+        "tokens.css:11"
+      ],
+      "sourceName": "--muted"
+    },
+    {
+      "name": "--meta",
+      "layer": "B-slot",
+      "value": "#5EBA82",
+      "confidence": "high",
+      "reason": "B-slot alias — --meta",
+      "sources": [
+        "tokens.css:12"
+      ],
+      "sourceName": "--meta"
+    },
+    {
+      "name": "--border",
+      "layer": "A1-identity",
+      "value": "rgba(232, 160, 74, 0.08)",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --border",
+      "sources": [
+        "tokens.css:13"
+      ],
+      "sourceName": "--border"
+    },
+    {
+      "name": "--border-soft",
+      "layer": "B-slot",
+      "value": "rgba(26, 22, 18, 0.12)",
+      "confidence": "high",
+      "reason": "B-slot alias — --border-soft",
+      "sources": [
+        "tokens.css:14"
+      ],
+      "sourceName": "--border-soft"
+    },
+    {
+      "name": "--accent",
+      "layer": "A1-identity",
+      "value": "#E8A04A",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --accent",
+      "sources": [
+        "tokens.css:15"
+      ],
+      "sourceName": "--accent"
+    },
+    {
+      "name": "--accent-on",
+      "layer": "A2",
+      "value": "#0A0807",
+      "confidence": "high",
+      "reason": "Standard A2 token — --accent-on",
+      "sources": [
+        "tokens.css:16"
+      ],
+      "sourceName": "--accent-on"
+    },
+    {
+      "name": "--accent-hover",
+      "layer": "A2",
+      "value": "color-mix(in oklab, var(--accent), black 8%)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --accent-hover",
+      "sources": [
+        "tokens.css:17"
+      ],
+      "sourceName": "--accent-hover"
+    },
+    {
+      "name": "--accent-active",
+      "layer": "A2",
+      "value": "color-mix(in oklab, var(--accent), black 14%)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --accent-active",
+      "sources": [
+        "tokens.css:18"
+      ],
+      "sourceName": "--accent-active"
+    },
+    {
+      "name": "--success",
+      "layer": "A2",
+      "value": "#5EBA82",
+      "confidence": "high",
+      "reason": "Standard A2 token — --success",
+      "sources": [
+        "tokens.css:19"
+      ],
+      "sourceName": "--success"
+    },
+    {
+      "name": "--warn",
+      "layer": "A2",
+      "value": "#f59e0b",
+      "confidence": "high",
+      "reason": "Standard A2 token — --warn",
+      "sources": [
+        "tokens.css:20"
+      ],
+      "sourceName": "--warn"
+    },
+    {
+      "name": "--danger",
+      "layer": "A2",
+      "value": "#EB5757",
+      "confidence": "high",
+      "reason": "Standard A2 token — --danger",
+      "sources": [
+        "tokens.css:21"
+      ],
+      "sourceName": "--danger"
+    },
+    {
+      "name": "--font-display",
+      "layer": "A1-identity",
+      "value": "'Space Grotesk', 'Inter', sans-serif",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --font-display",
+      "sources": [
+        "tokens.css:22"
+      ],
+      "sourceName": "--font-display"
+    },
+    {
+      "name": "--font-body",
+      "layer": "A1-identity",
+      "value": "'Inter', system-ui, sans-serif",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand token — --font-body",
+      "sources": [
+        "tokens.css:23"
+      ],
+      "sourceName": "--font-body"
+    },
+    {
+      "name": "--font-mono",
+      "layer": "A2",
+      "value": "'JetBrains Mono', ui-monospace, monospace",
+      "confidence": "high",
+      "reason": "Standard A2 token — --font-mono",
+      "sources": [
+        "tokens.css:24"
+      ],
+      "sourceName": "--font-mono"
+    },
+    {
+      "name": "--text-xs",
+      "layer": "A1-structure",
+      "value": "10px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-xs",
+      "sources": [
+        "tokens.css:25"
+      ],
+      "sourceName": "--text-xs"
+    },
+    {
+      "name": "--text-sm",
+      "layer": "A1-structure",
+      "value": "11px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-sm",
+      "sources": [
+        "tokens.css:26"
+      ],
+      "sourceName": "--text-sm"
+    },
+    {
+      "name": "--text-base",
+      "layer": "A1-structure",
+      "value": "16px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-base",
+      "sources": [
+        "tokens.css:27"
+      ],
+      "sourceName": "--text-base"
+    },
+    {
+      "name": "--text-lg",
+      "layer": "A1-structure",
+      "value": "18px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-lg",
+      "sources": [
+        "tokens.css:28"
+      ],
+      "sourceName": "--text-lg"
+    },
+    {
+      "name": "--text-xl",
+      "layer": "A1-structure",
+      "value": "24px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-xl",
+      "sources": [
+        "tokens.css:29"
+      ],
+      "sourceName": "--text-xl"
+    },
+    {
+      "name": "--text-2xl",
+      "layer": "A1-structure",
+      "value": "40px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-2xl",
+      "sources": [
+        "tokens.css:30"
+      ],
+      "sourceName": "--text-2xl"
+    },
+    {
+      "name": "--text-3xl",
+      "layer": "A1-structure",
+      "value": "64px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-3xl",
+      "sources": [
+        "tokens.css:31"
+      ],
+      "sourceName": "--text-3xl"
+    },
+    {
+      "name": "--text-4xl",
+      "layer": "A1-structure",
+      "value": "clamp(56px, 9vw, 144px)",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --text-4xl",
+      "sources": [
+        "tokens.css:32"
+      ],
+      "sourceName": "--text-4xl"
+    },
+    {
+      "name": "--leading-body",
+      "layer": "A1-structure",
+      "value": "1.6",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --leading-body",
+      "sources": [
+        "tokens.css:33"
+      ],
+      "sourceName": "--leading-body"
+    },
+    {
+      "name": "--leading-tight",
+      "layer": "A1-structure",
+      "value": "1.06",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --leading-tight",
+      "sources": [
+        "tokens.css:34"
+      ],
+      "sourceName": "--leading-tight"
+    },
+    {
+      "name": "--tracking-display",
+      "layer": "A1-structure",
+      "value": "-0.02em",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --tracking-display",
+      "sources": [
+        "tokens.css:35"
+      ],
+      "sourceName": "--tracking-display"
+    },
+    {
+      "name": "--space-1",
+      "layer": "A2",
+      "value": "4px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-1",
+      "sources": [
+        "tokens.css:36"
+      ],
+      "sourceName": "--space-1"
+    },
+    {
+      "name": "--space-2",
+      "layer": "A2",
+      "value": "8px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-2",
+      "sources": [
+        "tokens.css:37"
+      ],
+      "sourceName": "--space-2"
+    },
+    {
+      "name": "--space-3",
+      "layer": "A2",
+      "value": "12px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-3",
+      "sources": [
+        "tokens.css:38"
+      ],
+      "sourceName": "--space-3"
+    },
+    {
+      "name": "--space-4",
+      "layer": "A2",
+      "value": "16px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-4",
+      "sources": [
+        "tokens.css:39"
+      ],
+      "sourceName": "--space-4"
+    },
+    {
+      "name": "--space-5",
+      "layer": "A2",
+      "value": "24px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-5",
+      "sources": [
+        "tokens.css:40"
+      ],
+      "sourceName": "--space-5"
+    },
+    {
+      "name": "--space-6",
+      "layer": "A2",
+      "value": "32px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-6",
+      "sources": [
+        "tokens.css:41"
+      ],
+      "sourceName": "--space-6"
+    },
+    {
+      "name": "--space-8",
+      "layer": "A2",
+      "value": "64px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-8",
+      "sources": [
+        "tokens.css:42"
+      ],
+      "sourceName": "--space-8"
+    },
+    {
+      "name": "--space-12",
+      "layer": "A2",
+      "value": "96px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --space-12",
+      "sources": [
+        "tokens.css:43"
+      ],
+      "sourceName": "--space-12"
+    },
+    {
+      "name": "--space-20",
+      "layer": "C-extension",
+      "value": "128px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --space-20",
+      "sources": [
+        "tokens.css:44"
+      ],
+      "sourceName": "--space-20"
+    },
+    {
+      "name": "--section-y-desktop",
+      "layer": "A1-structure",
+      "value": "128px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --section-y-desktop",
+      "sources": [
+        "tokens.css:45"
+      ],
+      "sourceName": "--section-y-desktop"
+    },
+    {
+      "name": "--section-y-tablet",
+      "layer": "A1-structure",
+      "value": "80px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --section-y-tablet",
+      "sources": [
+        "tokens.css:46"
+      ],
+      "sourceName": "--section-y-tablet"
+    },
+    {
+      "name": "--section-y-phone",
+      "layer": "A1-structure",
+      "value": "48px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --section-y-phone",
+      "sources": [
+        "tokens.css:47"
+      ],
+      "sourceName": "--section-y-phone"
+    },
+    {
+      "name": "--radius-sm",
+      "layer": "A2",
+      "value": "4px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --radius-sm",
+      "sources": [
+        "tokens.css:48"
+      ],
+      "sourceName": "--radius-sm"
+    },
+    {
+      "name": "--radius-md",
+      "layer": "A2",
+      "value": "8px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --radius-md",
+      "sources": [
+        "tokens.css:49"
+      ],
+      "sourceName": "--radius-md"
+    },
+    {
+      "name": "--radius-lg",
+      "layer": "A2",
+      "value": "16px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --radius-lg",
+      "sources": [
+        "tokens.css:50"
+      ],
+      "sourceName": "--radius-lg"
+    },
+    {
+      "name": "--radius-pill",
+      "layer": "A2",
+      "value": "9999px",
+      "confidence": "high",
+      "reason": "Standard A2 token — --radius-pill",
+      "sources": [
+        "tokens.css:51"
+      ],
+      "sourceName": "--radius-pill"
+    },
+    {
+      "name": "--elev-flat",
+      "layer": "A2",
+      "value": "none",
+      "confidence": "high",
+      "reason": "Standard A2 token — --elev-flat",
+      "sources": [
+        "tokens.css:52"
+      ],
+      "sourceName": "--elev-flat"
+    },
+    {
+      "name": "--elev-ring",
+      "layer": "A2",
+      "value": "0 0 0 1px var(--border)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --elev-ring",
+      "sources": [
+        "tokens.css:53"
+      ],
+      "sourceName": "--elev-ring"
+    },
+    {
+      "name": "--elev-raised",
+      "layer": "A2",
+      "value": "0 20px 52px rgba(10, 8, 7, 0.3)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --elev-raised",
+      "sources": [
+        "tokens.css:54"
+      ],
+      "sourceName": "--elev-raised"
+    },
+    {
+      "name": "--focus-ring",
+      "layer": "A2",
+      "value": "0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --focus-ring",
+      "sources": [
+        "tokens.css:55"
+      ],
+      "sourceName": "--focus-ring"
+    },
+    {
+      "name": "--motion-fast",
+      "layer": "A2",
+      "value": "200ms",
+      "confidence": "high",
+      "reason": "Standard A2 token — --motion-fast",
+      "sources": [
+        "tokens.css:56"
+      ],
+      "sourceName": "--motion-fast"
+    },
+    {
+      "name": "--motion-base",
+      "layer": "A2",
+      "value": "400ms",
+      "confidence": "high",
+      "reason": "Standard A2 token — --motion-base",
+      "sources": [
+        "tokens.css:57"
+      ],
+      "sourceName": "--motion-base"
+    },
+    {
+      "name": "--ease-standard",
+      "layer": "A2",
+      "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "confidence": "high",
+      "reason": "Standard A2 token — --ease-standard",
+      "sources": [
+        "tokens.css:58"
+      ],
+      "sourceName": "--ease-standard"
+    },
+    {
+      "name": "--container-max",
+      "layer": "A1-structure",
+      "value": "1200px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --container-max",
+      "sources": [
+        "tokens.css:59"
+      ],
+      "sourceName": "--container-max"
+    },
+    {
+      "name": "--container-gutter-desktop",
+      "layer": "A1-structure",
+      "value": "36px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --container-gutter-desktop",
+      "sources": [
+        "tokens.css:60"
+      ],
+      "sourceName": "--container-gutter-desktop"
+    },
+    {
+      "name": "--container-gutter-tablet",
+      "layer": "A1-structure",
+      "value": "24px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --container-gutter-tablet",
+      "sources": [
+        "tokens.css:61"
+      ],
+      "sourceName": "--container-gutter-tablet"
+    },
+    {
+      "name": "--container-gutter-phone",
+      "layer": "A1-structure",
+      "value": "16px",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship structural token — --container-gutter-phone",
+      "sources": [
+        "tokens.css:62"
+      ],
+      "sourceName": "--container-gutter-phone"
+    },
+    {
+      "name": "--amber",
+      "layer": "C-extension",
+      "value": "#E8A04A",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --amber",
+      "sources": [
+        "tokens.css:63"
+      ],
+      "sourceName": "--amber"
+    },
+    {
+      "name": "--amber-deep",
+      "layer": "C-extension",
+      "value": "#B8762C",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --amber-deep",
+      "sources": [
+        "tokens.css:64"
+      ],
+      "sourceName": "--amber-deep"
+    },
+    {
+      "name": "--amber-soft",
+      "layer": "C-extension",
+      "value": "#F4C589",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --amber-soft",
+      "sources": [
+        "tokens.css:65"
+      ],
+      "sourceName": "--amber-soft"
+    },
+    {
+      "name": "--amber-glow",
+      "layer": "C-extension",
+      "value": "rgba(232, 160, 74, 0.35)",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --amber-glow",
+      "sources": [
+        "tokens.css:66"
+      ],
+      "sourceName": "--amber-glow"
+    },
+    {
+      "name": "--amber-wash",
+      "layer": "C-extension",
+      "value": "rgba(232, 160, 74, 0.08)",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --amber-wash",
+      "sources": [
+        "tokens.css:67"
+      ],
+      "sourceName": "--amber-wash"
+    },
+    {
+      "name": "--signal-green",
+      "layer": "C-extension",
+      "value": "#5EBA82",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --signal-green",
+      "sources": [
+        "tokens.css:68"
+      ],
+      "sourceName": "--signal-green"
+    },
+    {
+      "name": "--signal-red",
+      "layer": "C-extension",
+      "value": "#EB5757",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --signal-red",
+      "sources": [
+        "tokens.css:69"
+      ],
+      "sourceName": "--signal-red"
+    },
+    {
+      "name": "--signal-blue",
+      "layer": "C-extension",
+      "value": "#6F8FE8",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --signal-blue",
+      "sources": [
+        "tokens.css:70"
+      ],
+      "sourceName": "--signal-blue"
+    },
+    {
+      "name": "--text-paper",
+      "layer": "C-extension",
+      "value": "#1A1612",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --text-paper",
+      "sources": [
+        "tokens.css:71"
+      ],
+      "sourceName": "--text-paper"
+    },
+    {
+      "name": "--text-paper-soft",
+      "layer": "C-extension",
+      "value": "#4D4538",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --text-paper-soft",
+      "sources": [
+        "tokens.css:72"
+      ],
+      "sourceName": "--text-paper-soft"
+    },
+    {
+      "name": "--line-paper",
+      "layer": "C-extension",
+      "value": "rgba(26, 22, 18, 0.12)",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --line-paper",
+      "sources": [
+        "tokens.css:73"
+      ],
+      "sourceName": "--line-paper"
+    },
+    {
+      "name": "--bg-paper",
+      "layer": "C-extension",
+      "value": "#F5F0E6",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --bg-paper",
+      "sources": [
+        "tokens.css:74"
+      ],
+      "sourceName": "--bg-paper"
+    },
+    {
+      "name": "--bg-paper-soft",
+      "layer": "C-extension",
+      "value": "#EBE4D5",
+      "confidence": "high",
+      "reason": "FusionFirst Flagship brand extension — --bg-paper-soft",
+      "sources": [
+        "tokens.css:75"
+      ],
+      "sourceName": "--bg-paper-soft"
+    }
+  ]
+}

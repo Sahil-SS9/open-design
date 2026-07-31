@@ -1,0 +1,29 @@
+{
+  "sourceSystem": "HydraSkale Foundry ThemeTokens",
+  "sourcePath": "themes/kinetic/src/tokens.ts",
+  "mapping": {
+    "colours.primary": "--accent",
+    "colours.accent": "--meta",
+    "colours.ink": "--fg",
+    "colours.surface": "--surface",
+    "colours.inverse": "--bg",
+    "colours.muted": "--muted",
+    "fonts.display": "--font-display",
+    "fonts.body": "--font-body",
+    "fonts.mono": "--font-mono",
+    "radius": "--radius-sm"
+  },
+  "tokens": {
+    "--bg": "#F0EBDF",
+    "--surface": "#FFFFFF",
+    "--fg": "#0A0A09",
+    "--muted": "#6B6B6B",
+    "--accent": "#00C896",
+    "--meta": "#FF4F00",
+    "--border": "#D4CBB8",
+    "--font-display": "Space Grotesk",
+    "--font-body": "Geist",
+    "--font-mono": "JetBrains Mono",
+    "--radius-sm": "4px"
+  }
+}

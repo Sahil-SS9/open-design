@@ -1,0 +1,29 @@
+{
+  "name": "hydraskale",
+  "version": "0.1.0",
+  "apiVersion": "v1",
+  "pluginId": "hydraskale",
+  "displayName": "HydraSkale",
+  "description": "HydraSkale brand design system — teal + burnt orange AI/SaaS aesthetic",
+  "category": "branding",
+  "tags": ["brand", "ai-saas", "teal", "burnt-orange", "kensei"],
+  "designSystem": {
+    "id": "hydraskale",
+    "path": "design-systems/hydraskale"
+  },
+  "source": {
+    "type": "design-system",
+    "path": "design-systems/hydraskale"
+  },
+  "preview": {
+    "type": "html",
+    "entry": "components.html"
+  },
+  "metadata": {
+    "sourceRepo": "https://github.com/nexu-io/open-design",
+    "sourcePath": "design-systems/hydraskale",
+    "brandOrigin": "hydraskale-foundry",
+    "brandOriginPath": "/home/kensei/kensei-staging/fusionfirststudios-site",
+    "isolation": "opt-in"
+  }
+}

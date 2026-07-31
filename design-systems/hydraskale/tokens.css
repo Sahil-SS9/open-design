@@ -1,0 +1,139 @@
+/* design-systems/hydraskale/tokens.css
+ *
+ * Structured token bindings for HydraSkale.
+ *
+ * HydraSkale brand palette: bold teal (#00C896) + burnt orange (#FF4F00)
+ * on a warm cream (#F0EBDF) canvas with deep charcoal (#0A0A09) ink.
+ *
+ * Mapping from HydraSkale ThemeTokens schema (contracts/brand-tokens.md)
+ * to Open Design shared token contract (packages/contracts/src/design-systems/token-schema.ts):
+ *
+ *   HydraSkale          →  Open Design
+ *   colours.primary     →  --accent      (brand accent for CTAs, links)
+ *   colours.accent      →  --meta        (secondary accent — burnt orange)
+ *   colours.ink         →  --fg          (primary text)
+ *   colours.surface     →  --surface     (card/background lifted)
+ *   colours.inverse     →  --bg          (canvas — light surface)
+ *   colours.muted       →  --muted       (subtext)
+ *   fonts.display       →  --font-display
+ *   fonts.body          →  --font-body
+ *   fonts.mono          →  --font-mono
+ *   radius              →  --radius-sm   (HydraSkale uses 4px radius)
+ *
+ * The HydraSkale brand uses a bold, high-contrast mood with teal as the
+ * primary interaction signal and burnt orange as the secondary accent.
+ */
+
+:root {
+  /* ─── Surface ──────────────────────────────────────────────────────
+   * HydraSkale: surface is cream (#F0EBDF), ink is charcoal (#0A0A09).
+   * The canvas (--bg) is the lightest surface tier. */
+  --bg: #F0EBDF;
+  --surface: #FFFFFF;
+  --surface-warm: var(--surface);   /* alias — no tertiary tier */
+
+  /* ─── Foreground ────────────────────────────────────────────────────
+   * HydraSkale: ink is deep charcoal. No secondary text tier defined;
+   * --fg-2 and --meta alias to --fg / --muted respectively. */
+  --fg: #0A0A09;
+  --fg-2: var(--fg);                /* alias — no secondary tier */
+  --muted: #6B6B6B;                 /* derived: mutedOnSurface(ink, surface) */
+  --meta: var(--muted);             /* alias — no metadata tier */
+
+  /* ─── Border ────────────────────────────────────────────────────────
+   * Derived from muted at 30% opacity for subtle separation. */
+  --border: #D4CBB8;               /* muted tint at 30% */
+  --border-soft: var(--border);     /* alias — no soft tier */
+
+  /* ─── Accent ───────────────────────────────────────────────────────
+   * HydraSkale: teal (#00C896) is the primary interaction colour.
+   * Hard cap of 2 visible uses per screen (lint enforced). */
+  --accent: #00C896;
+  --accent-on: #0A0A09;             /* fg when accent is bg — charcoal for readability */
+  --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+  --accent-active: color-mix(in oklab, var(--accent), black 14%);
+
+  /* ─── Semantic ──────────────────────────────────────────────────────
+   * Reserved for state, not decoration. Under 5% of surface area. */
+  --success: #16a34a;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+
+  /* ─── Typography ────────────────────────────────────────────────────
+   * HydraSkale: Space Grotesk for display, Geist for body, JetBrains Mono for code. */
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Geist", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+
+  /* Type scale — bold, high-contrast hierarchy per HydraSkale mood */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 36px;
+  --text-3xl: 54px;
+  --text-4xl: 76px;
+
+  --leading-body: 1.5;
+  --leading-tight: 1.06;
+  --tracking-display: -0.02em;
+
+  /* ─── Spacing ───────────────────────────────────────────────────────
+   * 4px base grid, matching HydraSkale's radius=4px foundation. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-20: 80px;                 /* HydraSkale section gap twin */
+
+  /* Section rhythm — bold, roomy spacing */
+  --section-y-desktop: 80px;
+  --section-y-tablet: 48px;
+  --section-y-phone: 32px;
+
+  /* ─── Radius ────────────────────────────────────────────────────────
+   * HydraSkale uses 4px radius — sharp, precise, matching the brand's
+   * "bold" mood. Overrides the schema default of 8px. */
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-pill: 9999px;
+
+  /* ─── Elevation ─────────────────────────────────────────────────────
+   * HydraSkale: flat, precise. Uses ring elevation as primary,
+   * subtle raised for card lift. */
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 4px 12px rgba(10, 10, 9, 0.06);
+
+  /* ─── Focus ─────────────────────────────────────────────────────────
+   * Teal-tinted focus ring matching the brand accent. */
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+
+  /* ─── Motion ────────────────────────────────────────────────────────
+   * Short, purposeful transitions per anti-ai-slop contract. */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ─── Layout ────────────────────────────────────────────────────────
+   * Container width and per-breakpoint gutters. */
+  --container-max: 1200px;
+  --container-gutter-desktop: 36px;
+  --container-gutter-tablet: 24px;
+  --container-gutter-phone: 16px;
+
+  /* ─── HydraSkale brand extensions (Layer C) ─────────────────────────
+   * These tokens are HydraSkale-specific and not part of the shared
+   * schema. They are declared here because the HydraSkale theme
+   * components reference them directly. */
+  --primary: var(--accent);          /* HydraSkale alias: primary = accent (teal) */
+  --primary-ink: #008866;            /* text on primary (teal) — derived */
+  --accent-ink: #CC3300;             /* text on burnt orange accent */
+  --link: #008866;                   /* link colour — teal dark variant */
+}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HydraSkale — Spacing</title>
+  <style>
+    :root {
+      --bg: #F0EBDF;
+      --fg: #0A0A09;
+      --border: #D4CBB8;
+      --font-body: "Geist", system-ui, sans-serif;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --space-20: 80px;
+      --text-sm: 14px;
+      --text-base: 16px;
+    }
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-4); }
+    .row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .bar { height: 8px; background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1 style="font-size: var(--text-base);">HydraSkale Spacing Scale (4px grid)</h1>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-1</span><div class="bar" style="width: var(--space-1);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-2</span><div class="bar" style="width: var(--space-2);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-3</span><div class="bar" style="width: var(--space-3);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-4</span><div class="bar" style="width: var(--space-4);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-5</span><div class="bar" style="width: var(--space-5);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-6</span><div class="bar" style="width: var(--space-6);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-8</span><div class="bar" style="width: var(--space-8);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-12</span><div class="bar" style="width: var(--space-12);"></div></div>
+  <div class="row"><span style="width: 60px; font-size: var(--text-sm);">space-20</span><div class="bar" style="width: var(--space-20);"></div></div>
+</body>
+</html>

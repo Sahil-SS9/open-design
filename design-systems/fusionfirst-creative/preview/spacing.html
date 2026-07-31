@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FusionFirst Creative — Spacing</title>
+  <style>
+:root {
+
+  --bg: #0A0A0B;
+  --surface: #18181D;
+  --surface-warm: var(--surface);
+  --fg: #F5F5F0;
+  --fg-2: #A8A8A8;
+  --muted: #6B6B72;
+  --meta: var(--muted);
+  --border: #2A2A33;
+  --border-soft: var(--border);
+  --accent: #FF5722;
+  --accent-on: #0A0A0B;
+  --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+  --accent-active: color-mix(in oklab, var(--accent), black 14%);
+  --success: #5EBA82;
+  --warn: #f59e0b;
+  --danger: #FF3366;
+  --font-display: 'Inter Tight', 'Inter', -apple-system, system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 48px;
+  --text-4xl: 72px;
+  --leading-body: 1.6;
+  --leading-tight: 1.1;
+  --tracking-display: -0.02em;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --space-8: 96px;
+  --space-12: 128px;
+  --space-20: 192px;
+  --section-y-desktop: 96px;
+  --section-y-tablet: 64px;
+  --section-y-phone: 32px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 4px 12px rgba(10, 10, 11, 0.4);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+  --motion-fast: 150ms;
+  --motion-base: 300ms;
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --container-max: 1200px;
+  --container-gutter-desktop: 36px;
+  --container-gutter-tablet: 24px;
+  --container-gutter-phone: 16px;
+  --heat: #FF5722;
+  --fusion: #FFB627;
+  --plasma: #00E5FF;
+  --ember: #FF3366;
+  --text-on-heat: #0A0A0B;
+}
+
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-4); }
+    .row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .bar { height: 8px; background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1 style="font-size: var(--text-base); margin-bottom: var(--space-4);">FusionFirst Creative Spacing Scale</h1>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-1</span><div class="bar" style="width: var(--space-1);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-2</span><div class="bar" style="width: var(--space-2);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-3</span><div class="bar" style="width: var(--space-3);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-4</span><div class="bar" style="width: var(--space-4);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-5</span><div class="bar" style="width: var(--space-5);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-6</span><div class="bar" style="width: var(--space-6);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-8</span><div class="bar" style="width: var(--space-8);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-12</span><div class="bar" style="width: var(--space-12);"></div></div>
+  <div class="row"><span style="width: 80px; font-size: var(--text-xs);">--space-20</span><div class="bar" style="width: var(--space-20);"></div></div>
+</body>
+</html>

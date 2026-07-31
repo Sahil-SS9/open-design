@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HydraSkale — Component Fixture</title>
+  <style>
+    /* This :root block MUST be byte-equivalent (after comment/whitespace
+       normalization) to design-systems/hydraskale/tokens.css */
+    :root {
+      --bg: #F0EBDF;
+      --surface: #FFFFFF;
+      --surface-warm: var(--surface);
+      --fg: #0A0A09;
+      --fg-2: var(--fg);
+      --muted: #6B6B6B;
+      --meta: var(--muted);
+      --border: #D4CBB8;
+      --border-soft: var(--border);
+      --accent: #00C896;
+      --accent-on: #0A0A09;
+      --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+      --accent-active: color-mix(in oklab, var(--accent), black 14%);
+      --success: #16a34a;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --font-display: "Space Grotesk", system-ui, sans-serif;
+      --font-body: "Geist", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 18px;
+      --text-xl: 24px;
+      --text-2xl: 36px;
+      --text-3xl: 54px;
+      --text-4xl: 76px;
+      --leading-body: 1.5;
+      --leading-tight: 1.06;
+      --tracking-display: -0.02em;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --space-20: 80px;
+      --section-y-desktop: 80px;
+      --section-y-tablet: 48px;
+      --section-y-phone: 32px;
+      --radius-sm: 4px;
+      --radius-md: 4px;
+      --radius-lg: 8px;
+      --radius-pill: 9999px;
+      --elev-flat: none;
+      --elev-ring: 0 0 0 1px var(--border);
+      --elev-raised: 0 4px 12px rgba(10, 10, 9, 0.06);
+      --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+      --motion-fast: 150ms;
+      --motion-base: 200ms;
+      --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --container-max: 1200px;
+      --container-gutter-desktop: 36px;
+      --container-gutter-tablet: 24px;
+      --container-gutter-phone: 16px;
+      --primary: var(--accent);
+      --primary-ink: #008866;
+      --accent-ink: #CC3300;
+      --link: #008866;
+    }
+
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--fg);
+    }
+
+    .od-container {
+      max-width: var(--container-max);
+      margin: 0 auto;
+      padding: 0 var(--container-gutter-desktop);
+    }
+
+    /* ─── Button ─── */
+    .od-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      font-weight: 500;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: var(--space-3) var(--space-6);
+      cursor: pointer;
+      transition: background-color var(--motion-fast) var(--ease-standard),
+                  box-shadow var(--motion-fast) var(--ease-standard);
+    }
+    .od-btn-primary {
+      background: var(--accent);
+      color: var(--accent-on);
+    }
+    .od-btn-primary:hover {
+      background: var(--accent-hover);
+    }
+    .od-btn-primary:active {
+      background: var(--accent-active);
+    }
+    .od-btn-secondary {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--border);
+    }
+    .od-btn-secondary:hover {
+      background: var(--muted);
+      color: var(--surface);
+    }
+    .od-btn:focus-visible {
+      outline: var(--focus-ring);
+      outline-offset: 2px;
+    }
+
+    /* ─── Card ─── */
+    .od-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--elev-flat);
+      padding: var(--space-6);
+    }
+    .od-card-raised {
+      box-shadow: var(--elev-raised);
+    }
+
+    /* ─── Typography ─── */
+    .od-display {
+      font-family: var(--font-display);
+      font-size: var(--text-3xl);
+      line-height: var(--leading-tight);
+      letter-spacing: var(--tracking-display);
+      margin: 0 0 var(--space-4);
+    }
+    .od-heading {
+      font-family: var(--font-display);
+      font-size: var(--text-xl);
+      line-height: var(--leading-tight);
+      margin: 0 0 var(--space-3);
+    }
+    .od-body {
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: var(--leading-body);
+      margin: 0 0 var(--space-4);
+    }
+    .od-caption {
+      font-family: var(--font-body);
+      font-size: var(--text-sm);
+      color: var(--muted);
+      margin: 0;
+    }
+
+    /* ─── Layout demo ─── */
+    .od-demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: var(--space-8);
+      margin: var(--space-8) 0;
+    }
+
+    /* ─── Badges ─── */
+    .od-badge {
+      display: inline-flex;
+      align-items: center;
+      font-family: var(--font-body);
+      font-size: var(--text-xs);
+      font-weight: 600;
+      border-radius: var(--radius-pill);
+      padding: var(--space-1) var(--space-3);
+      line-height: 1;
+    }
+
+    /* ─── Inputs ─── */
+    .od-input {
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      padding: var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      color: var(--fg);
+      outline: none;
+      transition: border-color var(--motion-fast) var(--ease-standard),
+                  box-shadow var(--motion-fast) var(--ease-standard);
+    }
+    .od-input:focus-visible {
+      border-color: var(--accent);
+      box-shadow: var(--focus-ring);
+    }
+
+    /* ─── Links ─── */
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent);
+      transition: opacity var(--motion-fast) var(--ease-standard);
+    }
+    a:hover { opacity: 0.8; }
+
+    /* ─── Keyboard hints ─── */
+    .od-kbd {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: var(--space-1) var(--space-2);
+      box-shadow: var(--elev-ring);
+    }
+
+    /* ─── Icons ─── */
+    .od-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--space-6);
+      height: var(--space-6);
+      border-radius: var(--radius-sm);
+      font-size: var(--text-sm);
+      color: var(--fg);
+    }
+  </style>
+</head>
+<body>
+  <div class="od-container">
+    <h1 class="od-display">HydraSkale Design System</h1>
+    <p class="od-body">Bold teal + burnt orange. Sharp 4px radius. High-contrast layouts.</p>
+
+    <div class="od-demo-grid">
+      <div class="od-card od-card-raised">
+        <h2 class="od-heading">Primary Action</h2>
+        <p class="od-body">The teal accent drives all primary interactions.</p>
+        <button class="od-btn od-btn-primary">Get Started</button>
+      </div>
+      <div class="od-card">
+        <h2 class="od-heading">Secondary Action</h2>
+        <p class="od-body">Neutral cards with ring elevation.</p>
+        <button class="od-btn od-btn-secondary">Learn More</button>
+      </div>
+    </div>
+
+    <p class="od-caption">All tokens resolve via CSS custom properties. No raw hex outside :root.</p>
+  </div>
+
+  <!-- Badges -->
+  <div class="od-container" style="margin-top: var(--space-8);">
+    <h2 class="od-heading">Badges</h2>
+    <div style="display: flex; gap: var(--space-2); align-items: center;">
+      <span class="od-badge" style="background: var(--accent); color: var(--accent-on);">Active</span>
+      <span class="od-badge" style="background: var(--surface); color: var(--fg); border: 1px solid var(--border);">Default</span>
+      <span class="od-badge" style="background: var(--success); color: var(--surface);">Success</span>
+      <span class="od-badge" style="background: var(--warn); color: var(--surface);">Warning</span>
+    </div>
+  </div>
+
+  <!-- Links -->
+  <div class="od-container" style="margin-top: var(--space-8);">
+    <h2 class="od-heading">Links</h2>
+    <p class="od-body">Primary <a href="#">link</a> and secondary <a href="#" style="color: var(--fg); border-bottom: 1px solid var(--border);">link</a>.</p>
+  </div>
+
+  <!-- Inputs -->
+  <div class="od-container" style="margin-top: var(--space-8);">
+    <h2 class="od-heading">Inputs</h2>
+    <div style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 320px;">
+      <input type="text" class="od-input" placeholder="Enter your email" />
+      <textarea class="od-input" placeholder="Your message" rows="3"></textarea>
+    </div>
+  </div>
+
+  <!-- Keyboard hints -->
+  <div class="od-container" style="margin-top: var(--space-8);">
+    <h2 class="od-heading">Keyboard</h2>
+    <p class="od-body">Press <span class="od-kbd">Ctrl</span> + <span class="od-kbd">K</span> to search.</p>
+  </div>
+
+  <!-- Icons -->
+  <div class="od-container" style="margin-top: var(--space-8);">
+    <h2 class="od-heading">Icons</h2>
+    <div class="od-icon" style="display: inline-block;">★</div>
+  </div>
+</body>
+</html>

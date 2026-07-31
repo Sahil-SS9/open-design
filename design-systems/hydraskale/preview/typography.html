@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HydraSkale — Typography</title>
+  <style>
+    :root {
+      --bg: #F0EBDF;
+      --fg: #0A0A09;
+      --font-display: "Space Grotesk", system-ui, sans-serif;
+      --font-body: "Geist", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 18px;
+      --text-xl: 24px;
+      --text-2xl: 36px;
+      --text-3xl: 54px;
+      --text-4xl: 76px;
+      --leading-body: 1.5;
+      --leading-tight: 1.06;
+      --tracking-display: -0.02em;
+      --space-2: 8px;
+      --space-4: 16px;
+    }
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-4); }
+  </style>
+</head>
+<body>
+  <h1 style="font-family: var(--font-display); font-size: var(--text-4xl); line-height: var(--leading-tight); letter-spacing: var(--tracking-display);">Display — 76px</h1>
+  <h2 style="font-family: var(--font-display); font-size: var(--text-3xl); line-height: var(--leading-tight);">Headline — 54px</h2>
+  <h3 style="font-family: var(--font-display); font-size: var(--text-2xl); line-height: var(--leading-tight);">Section Title — 36px</h3>
+  <h4 style="font-family: var(--font-display); font-size: var(--text-xl); line-height: var(--leading-tight);">H2 — 24px</h4>
+  <p style="font-size: var(--text-base); line-height: var(--leading-body);">Body — 16px. The quick brown fox jumps over the lazy dog.</p>
+  <p style="font-size: var(--text-sm); line-height: var(--leading-body);">Caption — 14px. The quick brown fox jumps over the lazy dog.</p>
+  <p style="font-family: var(--font-mono); font-size: var(--text-base);">Code — 16px monospace. console.log("hello world");</p>
+</body>
+</html>

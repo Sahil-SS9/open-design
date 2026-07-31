@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HydraSkale — Colors</title>
+  <style>
+    :root {
+      --bg: #F0EBDF;
+      --surface: #FFFFFF;
+      --surface-warm: var(--surface);
+      --fg: #0A0A09;
+      --fg-2: var(--fg);
+      --muted: #6B6B6B;
+      --meta: var(--muted);
+      --border: #D4CBB8;
+      --border-soft: var(--border);
+      --accent: #00C896;
+      --accent-on: #0A0A09;
+      --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+      --accent-active: color-mix(in oklab, var(--accent), black 14%);
+      --success: #16a34a;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --font-display: "Space Grotesk", system-ui, sans-serif;
+      --font-body: "Geist", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      --text-xs: 12px;
+      --text-sm: 14px;
+      --text-base: 16px;
+      --text-lg: 18px;
+      --text-xl: 24px;
+      --text-2xl: 36px;
+      --text-3xl: 54px;
+      --text-4xl: 76px;
+      --leading-body: 1.5;
+      --leading-tight: 1.06;
+      --tracking-display: -0.02em;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 20px;
+      --space-6: 24px;
+      --space-8: 32px;
+      --space-12: 48px;
+      --space-20: 80px;
+      --section-y-desktop: 80px;
+      --section-y-tablet: 48px;
+      --section-y-phone: 32px;
+      --radius-sm: 4px;
+      --radius-md: 4px;
+      --radius-lg: 8px;
+      --radius-pill: 9999px;
+      --elev-flat: none;
+      --elev-ring: 0 0 0 1px var(--border);
+      --elev-raised: 0 4px 12px rgba(10, 10, 9, 0.06);
+      --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+      --motion-fast: 150ms;
+      --motion-base: 200ms;
+      --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --container-max: 1200px;
+      --container-gutter-desktop: 36px;
+      --container-gutter-tablet: 24px;
+      --container-gutter-phone: 16px;
+      --primary: var(--accent);
+      --primary-ink: #008866;
+      --accent-ink: #CC3300;
+      --link: #008866;
+    }
+    body { font-family: var(--font-body); background: var(--bg); color: var(--fg); margin: 0; padding: var(--space-8); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-4); }
+    .swatch { border-radius: var(--radius-sm); padding: var(--space-2); box-shadow: var(--elev-ring); }
+    .label { font-size: var(--text-xs); font-weight: 600; margin-top: var(--space-1); }
+  </style>
+</head>
+<body>
+  <h1 style="font-family: var(--font-display); font-size: var(--text-2xl);">HydraSkale Colors</h1>
+  <div class="grid">
+    <div class="swatch" style="background: var(--bg);"><div class="label">--bg (canvas)</div></div>
+    <div class="swatch" style="background: var(--surface);"><div class="label">--surface</div></div>
+    <div class="swatch" style="background: var(--accent); color: var(--accent-on);"><div class="label">--accent (teal)</div></div>
+    <div class="swatch" style="background: var(--meta); color: var(--surface);"><div class="label">--meta (orange)</div></div>
+    <div class="swatch" style="background: var(--fg); color: var(--surface);"><div class="label">--fg (ink)</div></div>
+    <div class="swatch" style="background: var(--muted);"><div class="label">--muted</div></div>
+    <div class="swatch" style="background: var(--border);"><div class="label">--border</div></div>
+    <div class="swatch" style="background: var(--success);"><div class="label">--success</div></div>
+    <div class="swatch" style="background: var(--warn);"><div class="label">--warn</div></div>
+    <div class="swatch" style="background: var(--danger);"><div class="label">--danger</div></div>
+  </div>
+</body>
+</html>
