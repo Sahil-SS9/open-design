@@ -4,17 +4,13 @@ import {
   BYOK_PROVIDER_PRESETS,
   DEFAULT_CONFIG,
   defaultKnownProviderModel,
-  fetchByokCredentialProfilesFromDaemon,
   fetchMediaProvidersFromDaemon,
   isStoredMediaProviderEntryEmpty,
   isStoredMediaProviderEntryPresent,
   KNOWN_PROVIDERS,
   loadConfig,
-  migrateLegacyByokCredentialsToDaemon,
   mergeDaemonConfig,
-  mergeByokCredentialProfiles,
   mergeDaemonMediaProviders,
-  persistByokCredentialProfileToDaemon,
   saveConfig,
   shouldSyncLocalMediaProvidersToDaemon,
   syncComposioConfigToDaemon,
@@ -86,6 +82,20 @@ describe('KNOWN_PROVIDERS', () => {
     );
 
     expect(defaultKnownProviderModel(ollamaCloud)).toBe('gpt-oss:120b');
+  });
+
+  it('defaults OpenRouter to a live model and records retired defaults', () => {
+    const openRouter = KNOWN_PROVIDERS.find(
+      (provider) => provider.label === 'OpenRouter',
+    );
+
+    expect(defaultKnownProviderModel(openRouter)).toBe(
+      'anthropic/claude-sonnet-4.6',
+    );
+    expect(openRouter?.retiredModels).toEqual([
+      'anthropic/claude-3.7-sonnet',
+      'anthropic/claude-3.5-sonnet',
+    ]);
   });
 });
 
@@ -161,8 +171,12 @@ describe('syncConfigToDaemon', () => {
     expect(url).toBe('/api/app-config');
     expect(init.method).toBe('PUT');
     expect(init.headers).toEqual({ 'content-type': 'application/json' });
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      onboardingCompleted: DEFAULT_CONFIG.onboardingCompleted,
+    const body = JSON.parse(String(init.body));
+    // A false `onboardingCompleted` is omitted rather than sent: the sync only
+    // ratchets it upward, so a stale local `false` can never re-arm first-run
+    // onboarding on the daemon. Resetting is opt-in via `allowOnboardingReset`.
+    expect(body).not.toHaveProperty('onboardingCompleted');
+    expect(body).toMatchObject({
       agentId: DEFAULT_CONFIG.agentId,
       agentModels: DEFAULT_CONFIG.agentModels,
       skillId: DEFAULT_CONFIG.skillId,
@@ -260,6 +274,44 @@ describe('syncMediaProvidersToDaemon', () => {
 });
 
 describe('mergeDaemonConfig', () => {
+  it('never un-completes onboarding from a daemon copy that predates the completion', () => {
+    // The user finished onboarding: the local copy flipped to true immediately,
+    // and the daemon PUT is asynchronous (and can fail outright). A daemon read
+    // that still says `false` must not roll the local completion back — the
+    // merged config is written straight back to BOTH localStorage and the
+    // daemon, so one stale read would permanently re-arm the first-run flow and
+    // the user would meet onboarding on every launch.
+    const merged = mergeDaemonConfig(
+      { ...DEFAULT_CONFIG, onboardingCompleted: true },
+      { onboardingCompleted: false },
+    );
+
+    expect(merged.onboardingCompleted).toBe(true);
+  });
+
+  it('lets an explicit reset clear onboarding once the local copy is already false', () => {
+    // Settings → "run setup again" writes false to both stores at once, so by
+    // the time the next merge runs the local copy is false too. The ratchet
+    // must not resurrect completion in that state.
+    const merged = mergeDaemonConfig(
+      { ...DEFAULT_CONFIG, onboardingCompleted: false },
+      { onboardingCompleted: false },
+    );
+
+    expect(merged.onboardingCompleted).toBe(false);
+  });
+
+  it('adopts a daemon completion for a local copy that never had one', () => {
+    // Fresh browser profile / cleared localStorage against a daemon that
+    // already recorded the completion: the user must not be re-onboarded.
+    const merged = mergeDaemonConfig(
+      { ...DEFAULT_CONFIG, onboardingCompleted: false },
+      { onboardingCompleted: true },
+    );
+
+    expect(merged.onboardingCompleted).toBe(true);
+  });
+
   it('clears stale local CLI env prefs when the daemon has none', () => {
     const merged = mergeDaemonConfig(
       {
@@ -935,6 +987,33 @@ afterEach(() => {
 });
 
 describe('loadConfig', () => {
+  it('enables completion sound and desktop notifications for a fresh config', () => {
+    expect(loadConfig().notifications).toEqual({
+      soundEnabled: true,
+      successSoundId: 'ding',
+      failureSoundId: 'buzz',
+      desktopEnabled: true,
+    });
+  });
+
+  it('preserves an explicit saved notification opt-out', () => {
+    store.set('open-design:config', JSON.stringify({
+      notifications: {
+        soundEnabled: false,
+        successSoundId: 'ding',
+        failureSoundId: 'buzz',
+        desktopEnabled: false,
+      },
+    }));
+
+    expect(loadConfig().notifications).toEqual({
+      soundEnabled: false,
+      successSoundId: 'ding',
+      failureSoundId: 'buzz',
+      desktopEnabled: false,
+    });
+  });
+
   it('migrates legacy OpenAI-compatible API configs to an explicit apiProtocol', () => {
     const legacyConfig: Partial<AppConfig> = {
       mode: 'api',
@@ -953,7 +1032,8 @@ describe('loadConfig', () => {
     expect(config.baseUrl).toBe('https://api.deepseek.com');
     expect(config.model).toBe('deepseek-v4-flash');
     expect(config.apiProtocol).toBe('openai');
-    expect(config.configMigrationVersion).toBe(2);
+    expect(config.configMigrationVersion).toBe(3);
+    expect(config.configMigrationVersion).toBe(3);
   });
 
   it('migrates retired provider defaults in active, protocol, and provider-draft configs', () => {
@@ -994,7 +1074,26 @@ describe('loadConfig', () => {
     expect(
       config.byokProviderConfigDrafts?.[`openai:${moonshotBaseUrl}`]?.apiConfig.model,
     ).toBe('kimi-k2.6');
-    expect(config.configMigrationVersion).toBe(2);
+    expect(config.configMigrationVersion).toBe(3);
+  });
+
+  it('migrates the retired OpenRouter default from migration version 3', () => {
+    const openRouterBaseUrl = 'https://openrouter.ai/api/v1';
+    const persisted: Partial<AppConfig> = {
+      mode: 'api',
+      apiProtocol: 'openai',
+      apiKey: 'sk-or-test',
+      baseUrl: openRouterBaseUrl,
+      model: 'anthropic/claude-3.7-sonnet',
+      apiProviderBaseUrl: openRouterBaseUrl,
+      configMigrationVersion: 3,
+    };
+    store.set('open-design:config', JSON.stringify(persisted));
+
+    const config = loadConfig();
+
+    expect(config.model).toBe('anthropic/claude-sonnet-4.6');
+    expect(config.configMigrationVersion).toBe(3);
   });
 
   it('migrates legacy SiliconFlow Global configs to the known OpenAI preset', () => {
@@ -1013,7 +1112,7 @@ describe('loadConfig', () => {
 
     expect(config.apiProtocol).toBe('openai');
     expect(config.apiProviderBaseUrl).toBe('https://api.siliconflow.com/v1');
-    expect(config.configMigrationVersion).toBe(2);
+    expect(config.configMigrationVersion).toBe(3);
   });
 
   it('keeps the parsed config when re-persisting a downgraded protocol fails', () => {
@@ -1105,7 +1204,7 @@ describe('loadConfig', () => {
     const config = loadConfig();
 
     expect(config.apiProtocol).toBe('openai');
-    expect(config.apiKey).toBe('');
+    expect(config.apiKey).toBe('sk-proxy');
     expect(config.apiVersion).toBe('2024-01-01');
     expect(config.baseUrl).toBe('https://proxy.example.com/bedrock-runtime/v1');
     expect(config.model).toBe('gpt-4o');
@@ -1192,7 +1291,7 @@ describe('loadConfig', () => {
     expect(config.apiProviderBaseUrl).toBe(DEFAULT_CONFIG.apiProviderBaseUrl);
     expect(config.apiProtocolConfigs?.bedrock).toBeUndefined();
     expect(config.apiProtocolConfigs?.openai).toEqual({
-      apiKey: '',
+      apiKey: 'sk-openai',
       baseUrl: 'https://api.openai.com/v1',
       model: 'gpt-4o',
     });
@@ -1200,15 +1299,11 @@ describe('loadConfig', () => {
     const persisted = JSON.parse(
       store.get('open-design:config') ?? '{}',
     ) as Partial<AppConfig>;
-    expect(persisted.apiProtocol).toBe('bedrock');
-    expect(persisted.apiKey).toBe('bedrock-secret');
-    expect(persisted.apiVersion).toBe('bedrock-2023-05-31');
-    expect(persisted.baseUrl).toBe(
-      'https://bedrock-runtime.us-east-1.amazonaws.com',
-    );
-    expect(persisted.apiProtocolConfigs?.bedrock?.apiKey).toBe(
-      'nested-bedrock-secret',
-    );
+    expect(persisted.apiProtocol).toBe('anthropic');
+    expect(persisted.apiKey).toBe('');
+    expect(persisted.apiVersion).toBe('');
+    expect(persisted.baseUrl).toBe(DEFAULT_CONFIG.baseUrl);
+    expect(persisted.apiProtocolConfigs?.bedrock).toBeUndefined();
     expect(persisted.apiProtocolConfigs?.openai).toEqual({
       apiKey: 'sk-openai',
       baseUrl: 'https://api.openai.com/v1',
@@ -1232,7 +1327,8 @@ describe('loadConfig', () => {
 
     expect(config.mode).toBe('daemon');
     expect(config.apiProtocol).toBe('openai');
-    expect(config.configMigrationVersion).toBe(2);
+    expect(config.configMigrationVersion).toBe(3);
+    expect(config.configMigrationVersion).toBe(3);
   });
 
   it('migrates legacy Ollama Cloud configs to an explicit ollama apiProtocol', () => {
@@ -1254,7 +1350,8 @@ describe('loadConfig', () => {
     expect(config.model).toBe('gpt-oss:120b');
     expect(config.apiProtocol).toBe('ollama');
     expect(config.apiProviderBaseUrl).toBe('https://ollama.com');
-    expect(config.configMigrationVersion).toBe(2);
+    expect(config.configMigrationVersion).toBe(3);
+    expect(config.configMigrationVersion).toBe(3);
   });
 
   it('migrates legacy ollama.com configs with a custom base URL path', () => {
@@ -1327,13 +1424,13 @@ describe('loadConfig', () => {
     const config = loadConfig();
 
     expect(config.mode).toBe('api');
-    expect(config.apiKey).toBe('');
+    expect(config.apiKey).toBe('sk-test');
     expect(config.baseUrl).toBe('https://[broken-ipv6');
     expect(config.model).toBe('custom-model');
     expect(config.apiProtocol).toBe('anthropic');
   });
 
-  it('preserves a valid saved accent color', () => {
+  it('preserves a valid saved accent color while forcing the theme back to light', () => {
     const savedConfig: Partial<AppConfig> = {
       theme: 'dark',
       accentColor: '#4F46E5',
@@ -1342,7 +1439,10 @@ describe('loadConfig', () => {
 
     const config = loadConfig();
 
-    expect(config.theme).toBe('dark');
+    // The theme setting was removed and the app ships light-only, so a stored
+    // dark preference is coerced on read (see tests/state/force-light-theme).
+    // The accent, which has no such rule, must still survive.
+    expect(config.theme).toBe('light');
     expect(config.accentColor).toBe('#4f46e5');
   });
 
@@ -1376,14 +1476,45 @@ describe('loadConfig', () => {
 
   it('sets an explicit apiProtocol for new default configs', () => {
     expect(DEFAULT_CONFIG.apiProtocol).toBe('anthropic');
-    expect(DEFAULT_CONFIG.configMigrationVersion).toBe(2);
-    expect(DEFAULT_CONFIG.accentColor).toBe('#c96442');
+    expect(DEFAULT_CONFIG.configMigrationVersion).toBe(3);
+    expect(DEFAULT_CONFIG.accentColor).toBe('#353535');
+  });
+
+  // Long-lived installs carry whatever accent shipped as the default when they
+  // were first run. Those values are no longer offered in the swatches, so a
+  // config still holding one is a stale default, not a user choice — it kept
+  // old installs off the current accent everywhere it is used.
+  it.each(['#87ea5c', '#c96442'])(
+    'resets the legacy default accent %s to the current default',
+    (legacy) => {
+      store.set(
+        'open-design:config',
+        JSON.stringify({ accentColor: legacy, configMigrationVersion: 2 }),
+      );
+
+      const config = loadConfig();
+
+      expect(config.accentColor).toBe(DEFAULT_CONFIG.accentColor);
+      expect(config.configMigrationVersion).toBe(3);
+    },
+  );
+
+  it('keeps a deliberately chosen accent through the migration', () => {
+    store.set(
+      'open-design:config',
+      JSON.stringify({ accentColor: '#1A74FF', configMigrationVersion: 2 }),
+    );
+
+    expect(loadConfig().accentColor).toBe('#1a74ff');
+    expect(DEFAULT_CONFIG.configMigrationVersion).toBe(3);
+    // #5517 把默认强调色改成中性灰,#c96442 随之进了 LEGACY_DEFAULT_ACCENT_COLORS。
+    expect(DEFAULT_CONFIG.accentColor).toBe('#353535');
   });
 });
 
 describe('saveConfig', () => {
-  it('keeps every BYOK API-key projection out of localStorage while preserving a secure profile reference', () => {
-    saveConfig({
+  it('persists Local BYOK API keys while removing unpublished secure-profile metadata', () => {
+    store.set('open-design:config', JSON.stringify({
       ...DEFAULT_CONFIG,
       mode: 'api',
       apiKey: 'top-level-secret',
@@ -1405,18 +1536,24 @@ describe('saveConfig', () => {
           },
         },
       },
-    });
+    }));
+
+    const loaded = loadConfig();
+    expect(loaded.apiKey).toBe('top-level-secret');
+    expect(loaded.apiProtocolConfigs?.openai?.apiKey).toBe('protocol-secret');
+    expect(loaded.byokProviderConfigDrafts?.openrouter?.apiConfig.apiKey).toBe('draft-secret');
+    saveConfig(loaded);
 
     const raw = store.get('open-design:config') ?? '';
     const saved = JSON.parse(raw);
-    expect(raw).not.toContain('top-level-secret');
-    expect(raw).not.toContain('protocol-secret');
-    expect(raw).not.toContain('draft-secret');
-    expect(saved.apiKey).toBe('');
-    expect(saved.apiProtocolConfigs.openai.apiKey).toBe('');
-    expect(saved.byokProviderConfigDrafts.openrouter.apiConfig.apiKey).toBe('');
-    expect(saved.byokProfileId).toBe('byok-openrouter-1');
-    expect(saved.byokCredentialConfigured).toBe(true);
+    expect(raw).toContain('top-level-secret');
+    expect(raw).toContain('protocol-secret');
+    expect(raw).toContain('draft-secret');
+    expect(saved.apiKey).toBe('top-level-secret');
+    expect(saved.apiProtocolConfigs.openai.apiKey).toBe('protocol-secret');
+    expect(saved.byokProviderConfigDrafts.openrouter.apiConfig.apiKey).toBe('draft-secret');
+    expect(saved.byokProfileId).toBeUndefined();
+    expect(saved.byokCredentialConfigured).toBeUndefined();
   });
 
   it('keeps daemon-owned privacy fields out of localStorage', () => {
@@ -1470,228 +1607,6 @@ describe('saveConfig', () => {
     expect(saved.agentCliEnvIntent).toEqual({
       claude: { apiKeyOverride: true },
       codex: { apiKeyOverride: true },
-    });
-  });
-});
-
-describe('secure BYOK profiles', () => {
-  afterEach(() => {
-    vi.stubGlobal('fetch', originalFetch);
-  });
-
-  it('persists a key only through the daemon profile endpoint and returns non-secret metadata', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body));
-      expect(request.apiKey).toBe('draft-secret');
-      return Response.json({
-        profile: {
-          id: 'byok-openrouter-1',
-          label: request.label,
-          protocol: request.protocol,
-          baseUrl: request.baseUrl,
-          model: request.model,
-          requiresApiKey: true,
-          configured: true,
-          keyTail: 'cret',
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const profile = await persistByokCredentialProfileToDaemon({
-      label: 'OpenRouter',
-      protocol: 'openai',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'openrouter/free',
-      apiKey: 'draft-secret',
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/byok/profiles',
-      expect.objectContaining({ method: 'POST' }),
-    );
-    expect(profile).not.toHaveProperty('apiKey');
-    expect(profile.id).toBe('byok-openrouter-1');
-  });
-
-  it('removes legacy browser credentials only after secure profile migration succeeds', async () => {
-    const persisted: Partial<AppConfig> = {
-      ...DEFAULT_CONFIG,
-      mode: 'api',
-      apiKey: 'legacy-secret',
-      apiProtocol: 'openai',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'openai/gpt-5.4',
-      apiProtocolConfigs: {
-        openai: {
-          apiKey: 'legacy-secret',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          model: 'openai/gpt-5.4',
-        },
-      },
-    };
-    store.set('open-design:config', JSON.stringify(persisted));
-    const loaded = loadConfig();
-    const persistProfile = vi.fn(async (input) => ({
-      id: input.id ?? 'missing',
-      label: input.label,
-      protocol: input.protocol,
-      baseUrl: input.baseUrl,
-      model: input.model,
-      apiVersion: input.apiVersion,
-      requiresApiKey: true,
-      configured: true,
-      keyTail: 'cret',
-      createdAt: 1,
-      updatedAt: 1,
-    }));
-
-    expect(loaded.apiKey).toBe('');
-    expect(store.get('open-design:config')).toContain('legacy-secret');
-
-    const result = await migrateLegacyByokCredentialsToDaemon(
-      loaded,
-      persistProfile,
-    );
-
-    expect(result.status).toBe('migrated');
-    expect(persistProfile).toHaveBeenCalledTimes(1);
-    expect(persistProfile).toHaveBeenCalledWith(expect.objectContaining({
-      id: expect.stringMatching(/^byok-legacy-/),
-      apiKey: 'legacy-secret',
-      protocol: 'openai',
-    }));
-    expect(result.config.apiKey).toBe('');
-    expect(result.config.byokProfileId).toMatch(/^byok-legacy-/);
-    expect(store.get('open-design:config')).not.toContain('legacy-secret');
-  });
-
-  it('preserves legacy browser credentials when secure profile migration fails', async () => {
-    const persisted: Partial<AppConfig> = {
-      ...DEFAULT_CONFIG,
-      mode: 'api',
-      apiKey: 'legacy-secret',
-      apiProtocol: 'openai',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'openai/gpt-5.4',
-    };
-    store.set('open-design:config', JSON.stringify(persisted));
-    const loaded = loadConfig();
-
-    const result = await migrateLegacyByokCredentialsToDaemon(
-      loaded,
-      async () => {
-        throw new Error('secure backend unavailable');
-      },
-    );
-
-    expect(result).toMatchObject({
-      status: 'failed',
-      error: { message: 'secure backend unavailable' },
-    });
-    expect(result.config.apiKey).toBe('');
-    expect(result.config.byokProfileId).toBeUndefined();
-    expect(store.get('open-design:config')).toContain('legacy-secret');
-
-    saveConfig({
-      ...result.config,
-      theme: 'dark',
-      mode: 'daemon',
-      agentId: 'codex',
-    });
-    const saved = JSON.parse(store.get('open-design:config') ?? '{}');
-    expect(saved.apiKey).toBe('legacy-secret');
-    expect(saved.theme).toBe('dark');
-    expect(saved.mode).toBe('daemon');
-    expect(saved.agentId).toBe('codex');
-  });
-
-  it('hydrates only an explicitly selected secure profile reference', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
-      available: true,
-      backend: 'macos-keychain',
-      profiles: [{
-        id: 'byok-openrouter-1',
-        label: 'OpenRouter',
-        protocol: 'openai',
-        baseUrl: 'https://openrouter.ai/api/v1',
-        model: 'openrouter/free',
-        requiresApiKey: true,
-        configured: true,
-        keyTail: '1234',
-        createdAt: 1,
-        updatedAt: 1,
-      }],
-    })));
-
-    const response = await fetchByokCredentialProfilesFromDaemon();
-    const merged = mergeByokCredentialProfiles({
-      ...DEFAULT_CONFIG,
-      byokProfileId: 'byok-openrouter-1',
-    }, response);
-
-    expect(merged).toMatchObject({
-      byokProfileId: 'byok-openrouter-1',
-      byokCredentialConfigured: true,
-      byokCredentialTail: '1234',
-    });
-    expect(merged.apiKey).toBe('');
-  });
-
-  it('uses daemon profile metadata as authoritative after a CLI update', () => {
-    const merged = mergeByokCredentialProfiles({
-      ...DEFAULT_CONFIG,
-      apiKey: '',
-      apiProtocol: 'anthropic',
-      apiVersion: 'stale-version',
-      baseUrl: 'https://stale.example/v1',
-      model: 'stale-model',
-      byokProfileId: 'byok-openrouter-1',
-      apiProtocolConfigs: {
-        openai: {
-          apiKey: '',
-          apiVersion: 'stale-version',
-          baseUrl: 'https://stale.example/v1',
-          model: 'stale-model',
-        },
-      },
-    }, {
-      available: true,
-      backend: 'macos-keychain',
-      profiles: [{
-        id: 'byok-openrouter-1',
-        label: 'OpenRouter',
-        protocol: 'openai',
-        baseUrl: 'https://openrouter.ai/api/v1',
-        model: 'openai/gpt-5.4',
-        apiVersion: '2026-07-01',
-        requiresApiKey: true,
-        configured: true,
-        keyTail: '1234',
-        createdAt: 1,
-        updatedAt: 2,
-      }],
-    });
-
-    expect(merged).toMatchObject({
-      apiProtocol: 'openai',
-      apiProviderBaseUrl: 'https://openrouter.ai/api/v1',
-      apiVersion: '2026-07-01',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      model: 'openai/gpt-5.4',
-      byokCredentialConfigured: true,
-      byokCredentialTail: '1234',
-      apiProtocolConfigs: {
-        openai: {
-          apiKey: '',
-          apiProviderBaseUrl: 'https://openrouter.ai/api/v1',
-          apiVersion: '2026-07-01',
-          baseUrl: 'https://openrouter.ai/api/v1',
-          model: 'openai/gpt-5.4',
-        },
-      },
     });
   });
 });

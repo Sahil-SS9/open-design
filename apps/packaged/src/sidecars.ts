@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { access, appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
+import { access, appendFile, mkdir, open, rename, type FileHandle } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -13,24 +13,23 @@ import {
   type AppKey,
   type DaemonStatusSnapshot,
   type RegisterWebUrlResult,
-  type SidecarStamp,
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
 import {
-  createSidecarLaunchEnv,
-  requestJsonIpc,
-  resolveAppIpcPath,
+  getSidecarStatus,
+  invokeSidecar,
+  spawnSidecar,
+  stopSidecar,
+  type SpawnedSidecar,
+  type SidecarStamp,
   type SidecarRuntimeContext,
 } from "@open-design/sidecar";
 import {
-  createProcessStampArgs,
-  isProcessAlive,
   mergeProxyAwareEnv,
   resolveSystemProxyEnv,
-  stopProcesses,
-  waitForProcessExit,
   wellKnownUserToolchainBins,
 } from "@open-design/platform";
+import { releaseChannelFromNamespace, releaseChannelFromVersion } from "@open-design/release";
 
 import type { PackagedWebOutputMode } from "./config.js";
 import type { PackagedNamespacePaths } from "./paths.js";
@@ -39,6 +38,7 @@ import {
   resolveDaemonPrewarmTargets,
   resolveWebPrewarmTargets,
 } from "./prewarm.js";
+import { workspaceTeamTransportEnv } from "./workspace-team.js";
 
 const require = createRequire(import.meta.url);
 const PACKAGED_CHILD_ENV_ALLOWLIST = [
@@ -59,6 +59,7 @@ const PACKAGED_CHILD_ENV_ALLOWLIST = [
   "http_proxy",
   "https_proxy",
   "no_proxy",
+  "OD_ALLOWED_INTERNAL_HOSTS",
 ] as const;
 
 // The daemon owns the historical-outer compatibility handoff. Preserve the
@@ -96,6 +97,13 @@ function shouldForwardPackagedChildEnv(key: string, includeProviderSecrets = fal
 
 export type PackagedSidecarHandle = {
   close(): Promise<void>;
+  /**
+   * URL of the web sidecar that is live *right now*. `web` below is the
+   * first-boot snapshot and goes stale as soon as the sidecar is
+   * respawned on a fresh ephemeral port, so anything that dials the
+   * sidecar per request must read this instead.
+   */
+  currentWebUrl(): string;
   daemon: DaemonStatusSnapshot;
   web: WebStatusSnapshot;
 };
@@ -103,9 +111,10 @@ export type PackagedSidecarHandle = {
 type ManagedSidecarChild = {
   app: AppKey;
   child: ChildProcess;
-  ipcPath: string;
+  generation: SpawnedSidecar;
   logHandle: FileHandle;
   logPath: string;
+  stamp: SidecarStamp;
 };
 
 type PackagedDaemonManagedPathEnv = {
@@ -174,9 +183,51 @@ export async function resolvePackagedElectronNodeCommand(
   return (await pathExists(helperPath)) ? helperPath : execPath;
 }
 
-async function openLog(path: string): Promise<FileHandle> {
+/**
+ * Open a sidecar's latest.log for a fresh session, preserving the prior
+ * session's log as previous.log.
+ *
+ * INVARIANT: starting a new session must not destroy the previous session's
+ * log. latest.log is opened with mode "w" (each session's log starts clean),
+ * which used to erase the one log that matters after an incident-triggered
+ * relaunch — support bundles then held only the ~70 lines written since the
+ * restart while the incident-time daemon log was gone. Rotating the prior
+ * file aside keeps exactly ONE previous session (rename overwrites the older
+ * previous.log), so retention stays bounded while the diagnostics export
+ * (apps/daemon/src/diagnostics-export.ts) can bundle the pre-restart window.
+ *
+ * Rotation is best-effort: ENOENT on first launch is the normal case, and an
+ * exotic filesystem refusal must never block sidecar startup. Best-effort must
+ * not degrade INTO the data loss it prevents, though, so a failed rotation
+ * falls back to appending: a merged two-session log is recoverable, an erased
+ * one is not. Persistent rotation failure therefore trades bounded growth for
+ * retention, and the diagnostics export reads a bounded tail either way.
+ *
+ * Exported for tests; production callers go through the spawn path.
+ */
+export async function openLog(path: string): Promise<FileHandle> {
   await mkdir(dirname(path), { recursive: true });
-  return await open(path, "w");
+  const priorLogIsSafeToDiscard = await rotatePriorLogAside(path);
+  return await open(path, priorLogIsSafeToDiscard ? "w" : "a");
+}
+
+/**
+ * Move a prior session's log aside, reporting whether the caller may safely
+ * truncate the path.
+ *
+ * Truncating is only safe once the prior session's bytes live somewhere else:
+ * moved to previous.log, or never written at all (ENOENT on first launch). Any
+ * other rename failure — a Windows share-lock on previous.log, a read-only or
+ * exotic filesystem — leaves the prior log at `path`, where "w" would destroy
+ * exactly the incident-time log this rotation exists to preserve.
+ */
+async function rotatePriorLogAside(path: string): Promise<boolean> {
+  try {
+    await rename(path, join(dirname(path), "previous.log"));
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
+  }
 }
 
 const DAEMON_STATUS_TIMEOUT_MS = 35_000;
@@ -198,6 +249,13 @@ const WIN32_STATUS_TIMEOUT_MS = 90_000;
 // widened budget is the safety net for slow devices, mirroring the win32
 // rationale above (same "slow, not dead" failure class as #5515).
 const LINUX_STATUS_TIMEOUT_MS = 90_000;
+// Packaged 0.18.1 macOS cold starts on Apple Silicon can exceed the 35s
+// baseline: the daemon sidecar needs extra time to finish initialization
+// before the desktop's status timeout fires. Widening the darwin budget
+// to 90s matches the win32/linux safety net for "slow, not dead" first
+// launches and prevents the timeout cascade that leaves the desktop on a
+// stale web URL (issue #6637).
+const DARWIN_STATUS_TIMEOUT_MS = 90_000;
 const DAEMON_MIGRATION_STATUS_TIMEOUT_MS = 30 * 60 * 1000;
 
 // Poll cadence for waitForStatus: start tight so a fast daemon is detected
@@ -209,18 +267,21 @@ const STATUS_POLL_MAX_MS = 1500;
 
 // Baseline status wait budget by platform, before the daemon-only legacy
 // migration override. win32 gets the wider AV-scan headroom, linux gets the
-// same headroom for AppImage FUSE cold starts; every other OS keeps the 35s
-// baseline.
+// same headroom for AppImage FUSE cold starts; darwin gets the same headroom
+// for packaged 0.18.1+ cold starts on Apple Silicon; every other OS keeps the
+// 35s baseline.
 function baseStatusTimeoutMs(platform: NodeJS.Platform = process.platform): number {
   if (platform === "win32") return WIN32_STATUS_TIMEOUT_MS;
   if (platform === "linux") return LINUX_STATUS_TIMEOUT_MS;
+  if (platform === "darwin") return DARWIN_STATUS_TIMEOUT_MS;
   return DAEMON_STATUS_TIMEOUT_MS;
 }
 
 /**
  * Daemon status wait budget. The platform baseline (35s, or 90s on win32 for
- * AV-scan headroom and on linux for AppImage FUSE cold starts) is fine for
- * normal cold boots, but the OD_LEGACY_DATA_DIR
+ * AV-scan headroom, on linux for AppImage FUSE cold starts, and on darwin for
+ * packaged 0.18.1+ Apple Silicon cold starts) is fine for normal cold boots,
+ * but the OD_LEGACY_DATA_DIR
  * one-shot recovery flow can synch-copy a multi-GB legacy `.od/` payload before
  * SQLite even opens, and killing the child mid-migration can leave dataDir
  * half-promoted. When the env var is set, use a 30-minute budget so the parent
@@ -229,6 +290,181 @@ function baseStatusTimeoutMs(platform: NodeJS.Platform = process.platform): numb
  * @see apps/daemon/src/legacy-data-migrator.ts
  * @see https://github.com/nexu-io/open-design/issues/710
  */
+export type RestartPolicy = { allow(nowMs: number): boolean };
+
+/**
+ * Sliding-window cap on sidecar respawns.
+ *
+ * A sidecar that dies once should come back; a sidecar that crashes
+ * during boot must not respawn forever, because each attempt spends a
+ * full Next.js boot and would pin a core indefinitely.
+ *
+ * ponytail: a plain array of timestamps pruned by filter — the window
+ * holds single digits of entries, so a ring buffer would be more code
+ * for no measurable gain.
+ */
+export function createRestartPolicy(
+  options: { maxRestarts?: number; windowMs?: number } = {},
+): RestartPolicy {
+  const maxRestarts = options.maxRestarts ?? 5;
+  const windowMs = options.windowMs ?? 60_000;
+  let attempts: number[] = [];
+  return {
+    allow(nowMs: number): boolean {
+      attempts = attempts.filter((at) => nowMs - at < windowMs);
+      if (attempts.length >= maxRestarts) return false;
+      attempts.push(nowMs);
+      return true;
+    },
+  };
+}
+
+/**
+ * Owns the packaged web sidecar across initial boot, bounded crash recovery,
+ * and shutdown. Dependencies are injected so lifecycle races can be exercised
+ * deterministically without spawning real Electron children in unit tests.
+ */
+export function createWebSidecarSupervisor<
+  TChild,
+  TStatus extends { url: string | null },
+>(options: {
+  closeChild: (child: TChild) => Promise<void>;
+  hasExited: (child: TChild) => boolean;
+  now?: () => number;
+  onExit: (child: TChild, listener: () => void) => void;
+  policy?: RestartPolicy;
+  registerUrl: (url: string) => Promise<void>;
+  spawn: () => Promise<TChild>;
+  waitUntilReady: (child: TChild) => Promise<TStatus>;
+}): {
+  close(): Promise<void>;
+  currentUrl(): string;
+  start(): Promise<TStatus>;
+} {
+  const policy = options.policy ?? createRestartPolicy();
+  const now = options.now ?? Date.now;
+  const children = new Set<TChild>();
+  const closedChildren = new Set<TChild>();
+  let closing = false;
+  let closeTask: Promise<void> | null = null;
+  let currentUrl = "";
+  let pendingExitedChild: TChild | null = null;
+  let restartTask: Promise<void> | null = null;
+
+  const closeChildOnce = async (child: TChild): Promise<void> => {
+    if (closedChildren.has(child)) return;
+    closedChildren.add(child);
+    children.delete(child);
+    await options.closeChild(child);
+  };
+
+  const spawnAndPromote = async (): Promise<TStatus> => {
+    const child = await options.spawn();
+    children.add(child);
+    let promoted = false;
+    let exited = options.hasExited(child);
+
+    // Install supervision before readiness. A replacement that exits during
+    // boot is retried by restartUntilReady below; a promoted child schedules a
+    // fresh restart cycle when it later exits.
+    options.onExit(child, () => {
+      exited = true;
+      if (promoted && !closing) scheduleRestart(child);
+    });
+
+    try {
+      if (closing) throw new Error("packaged web sidecar supervisor is closing");
+      const status = await options.waitUntilReady(child);
+      if (status.url == null) throw new Error("web did not report a URL");
+      if (closing) throw new Error("packaged web sidecar supervisor is closing");
+      if (exited || options.hasExited(child)) {
+        throw new Error("web exited before its ready status could be promoted");
+      }
+
+      await options.registerUrl(status.url);
+      if (closing) throw new Error("packaged web sidecar supervisor is closing");
+      if (exited || options.hasExited(child)) {
+        throw new Error("web exited while its ready status was being registered");
+      }
+
+      // These assignments are synchronous: once promoted is true, any later
+      // exit event schedules another restart instead of being mistaken for a
+      // boot failure owned by the current restart loop.
+      promoted = true;
+      currentUrl = status.url;
+      return status;
+    } catch (error) {
+      await closeChildOnce(child).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const restartUntilReady = async (): Promise<void> => {
+    while (!closing) {
+      if (!policy.allow(now())) {
+        console.error("packaged web sidecar restart budget exhausted; not respawning");
+        return;
+      }
+      try {
+        await spawnAndPromote();
+        return;
+      } catch (error: unknown) {
+        if (closing) return;
+        console.error("failed to restart packaged web sidecar", error);
+      }
+    }
+  };
+
+  function scheduleRestart(exitedChild: TChild): void {
+    pendingExitedChild = exitedChild;
+    if (restartTask != null || closing) return;
+
+    const task = (async () => {
+      while (!closing && pendingExitedChild != null) {
+        const childToClose = pendingExitedChild;
+        pendingExitedChild = null;
+        await closeChildOnce(childToClose).catch((error: unknown) => {
+          console.error("failed to close exited packaged web sidecar", error);
+        });
+        await restartUntilReady();
+      }
+    })();
+    restartTask = task;
+    void task
+      .finally(() => {
+        if (restartTask === task) restartTask = null;
+        if (!closing && pendingExitedChild != null) scheduleRestart(pendingExitedChild);
+      })
+      .catch((error: unknown) => {
+        console.error("packaged web sidecar supervisor failed", error);
+      });
+  }
+
+  return {
+    async close(): Promise<void> {
+      if (closeTask != null) return await closeTask;
+      closing = true;
+      pendingExitedChild = null;
+      closeTask = (async () => {
+        // Close children already known to the supervisor first. Then await an
+        // in-flight deferred spawn: spawnAndPromote re-checks closing as soon as
+        // it resolves and closes that late child before returning. The final
+        // pass covers a child added between the first snapshot and the await.
+        for (const child of [...children].reverse()) {
+          await closeChildOnce(child).catch(() => undefined);
+        }
+        await restartTask?.catch(() => undefined);
+        for (const child of [...children].reverse()) {
+          await closeChildOnce(child).catch(() => undefined);
+        }
+      })();
+      return await closeTask;
+    },
+    currentUrl: () => currentUrl,
+    start: spawnAndPromote,
+  };
+}
+
 export function resolveDaemonStatusTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -251,7 +487,7 @@ export function resolveDaemonStatusTimeoutMs(
  * so the user can read the actual failure reason.
  */
 export async function waitForStatus<T>(
-  ipcPath: string,
+  probe: { label: string; read(timeoutMs: number): Promise<T> },
   isReady: (status: T) => boolean,
   timeoutMs = DAEMON_STATUS_TIMEOUT_MS,
   watch: { child: { exitCode: number | null; pid?: number; signalCode: NodeJS.Signals | null; once: (event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void) => void; off: (event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void) => void }; logPath: string } | null = null,
@@ -281,33 +517,14 @@ export async function waitForStatus<T>(
         );
       }
       try {
-        const status = await requestJsonIpc<T>(
-          ipcPath,
-          { type: SIDECAR_MESSAGES.STATUS },
-          { timeoutMs: 800 },
-        );
-        const statusPid = typeof (status as { pid?: unknown }).pid === "number"
-          ? (status as { pid: number }).pid
-          : null;
-        if (watch?.child.pid != null) {
-          if (statusPid == null) {
-            lastError = new Error(`sidecar status did not include pid for spawned pid ${watch.child.pid}`);
-            await sleep(STATUS_POLL_INITIAL_MS);
-            continue;
-          }
-          if (statusPid !== watch.child.pid) {
-            lastError = new Error(`sidecar status pid ${statusPid} did not match spawned pid ${watch.child.pid}`);
-            await sleep(STATUS_POLL_INITIAL_MS);
-            continue;
-          }
-        }
+        const status = await probe.read(800);
         if (isReady(status)) return status;
       } catch (error) {
         lastError = error;
       }
       // Keep timeoutMs a hard-ish upper bound: never sleep past the deadline, so
       // the widened win32 budget can't be overshot by a full backoff interval on
-      // a slow/dead sidecar. The in-flight requestJsonIpc timeout is the only
+      // a slow/dead sidecar. The in-flight client request timeout is the only
       // residual overshoot; the while-condition re-checks the deadline next tick.
       const remaining = timeoutMs - (Date.now() - startedAt);
       if (remaining <= 0) break;
@@ -316,7 +533,7 @@ export async function waitForStatus<T>(
     }
 
     throw new Error(
-      `timed out waiting for sidecar status at ${ipcPath}${
+      `timed out waiting for ${probe.label} sidecar status${
         lastError instanceof Error ? ` (${lastError.message})` : ""
       }`,
     );
@@ -325,38 +542,28 @@ export async function waitForStatus<T>(
   }
 }
 
-async function retireExistingSidecarEndpoint(ipcPath: string, logPath: string): Promise<void> {
-  let status: { pid?: number | null } | null = null;
-  try {
-    status = await requestJsonIpc<{ pid?: number | null }>(
-      ipcPath,
-      { type: SIDECAR_MESSAGES.STATUS },
-      { timeoutMs: 350 },
-    );
-  } catch {
-    return;
-  }
-
-  const pid = typeof status.pid === "number" ? status.pid : null;
+export async function retireExistingSidecar(
+  stamp: SidecarStamp,
+  logPath: string,
+  deps: {
+    stop?: typeof stopSidecar;
+  } = {},
+): Promise<void> {
   await appendSidecarLifecycleLog(
     logPath,
-    `[open-design packaged] existing sidecar endpoint detected ipc=${ipcPath} pid=${pid ?? "unknown"}; requesting shutdown before relaunch`,
+    `[open-design packaged] retiring prior ${stamp.app} generation before launch`,
   );
   try {
-    await requestJsonIpc(ipcPath, { type: SIDECAR_MESSAGES.SHUTDOWN }, { timeoutMs: 800 });
+    const stopped = await (deps.stop ?? stopSidecar)(stamp, { termGraceMs: 2_500 });
+    if (stopped.remainingPids.length > 0) {
+      throw new Error(`generation remains: ${stopped.remainingPids.join(", ")}`);
+    }
   } catch (error) {
     await appendSidecarLifecycleLog(
       logPath,
-      `[open-design packaged] existing sidecar shutdown request failed ipc=${ipcPath} error=${error instanceof Error ? error.message : String(error)}`,
+      `[open-design packaged] existing sidecar shutdown failed app=${stamp.app} error=${error instanceof Error ? error.message : String(error)}`,
     );
-  }
-
-  if (pid != null && pid !== process.pid && isProcessAlive(pid)) {
-    const exited = await waitForProcessExit(pid, 2500);
-    await appendSidecarLifecycleLog(
-      logPath,
-      `[open-design packaged] existing sidecar endpoint ${exited ? "exited" : "still-running"} ipc=${ipcPath} pid=${pid}`,
-    );
+    throw error;
   }
 }
 
@@ -431,6 +638,12 @@ export type PackagedDaemonSpawnEnvOptions = {
   telemetryRelayUrl?: string | null;
   posthogKey?: string | null;
   posthogHost?: string | null;
+  /**
+   * Vela web console origin baked into the bundle at packaging time. Half of
+   * the workspace-team gate — see {@link workspaceTeamTransportEnv}.
+   */
+  velaWebUrl?: string | null;
+  velaWebUrls?: Record<string, string>;
 };
 
 /**
@@ -465,6 +678,10 @@ export function buildPackagedDaemonSpawnEnv(
     ...(options.amrProfile == null || options.amrProfile.length === 0
       ? {}
       : { OPEN_DESIGN_AMR_PROFILE: options.amrProfile }),
+    ...workspaceTeamTransportEnv(options.amrProfile, options.velaWebUrl),
+    ...(options.velaWebUrls == null || Object.keys(options.velaWebUrls).length === 0
+      ? {}
+      : { OD_VELA_WEB_URLS: JSON.stringify(options.velaWebUrls) }),
     ...(options.appVersion == null ? {} : { OD_APP_VERSION: options.appVersion }),
     ...(options.mcpBootstrapCommand == null
       || options.mcpBootstrapCommand.length === 0
@@ -509,8 +726,23 @@ function pickPackagedDesktopHandoffEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEn
   return selected;
 }
 
+export function packagedChildStamp(
+  app: AppKey,
+  channel: string,
+  runtime: SidecarRuntimeContext<SidecarStamp>,
+): SidecarStamp {
+  return {
+    app,
+    channel,
+    mode: runtime.mode,
+    namespace: runtime.namespace,
+    source: runtime.source,
+  };
+}
+
 async function spawnSidecarChild(options: {
   app: AppKey;
+  channel: string;
   electronNodeCommand: string | null;
   entryPath: string;
   env: NodeJS.ProcessEnv;
@@ -518,29 +750,15 @@ async function spawnSidecarChild(options: {
   paths: PackagedNamespacePaths;
   runtime: SidecarRuntimeContext<SidecarStamp>;
 }): Promise<ManagedSidecarChild> {
-  const ipcPath = resolveAppIpcPath({
-    app: options.app,
-    contract: OPEN_DESIGN_SIDECAR_CONTRACT,
-    namespace: options.runtime.namespace,
-  });
-  const stamp = {
-    app: options.app,
-    ipc: ipcPath,
-    mode: SIDECAR_MODES.RUNTIME,
-    namespace: options.runtime.namespace,
-    source: options.runtime.source,
-  } satisfies SidecarStamp;
+  const stamp = packagedChildStamp(options.app, options.channel, options.runtime);
   const logPath = logPathFor(options.paths, options.app);
   const logHandle = await openLog(logPath);
-  await retireExistingSidecarEndpoint(ipcPath, logPath);
+  await retireExistingSidecar(stamp, logPath);
   const usesElectronAsNode = options.nodeCommand == null;
   const command = options.nodeCommand
     ?? options.electronNodeCommand
     ?? await resolvePackagedElectronNodeCommand();
-  const childEnv = createSidecarLaunchEnv({
-    base: options.paths.runtimeRoot,
-    contract: OPEN_DESIGN_SIDECAR_CONTRACT,
-    extraEnv: {
+  const childEnv = {
       ...resolvePackagedChildBaseEnv(
         process.env,
         options.app === APP_KEYS.DAEMON,
@@ -551,25 +769,25 @@ async function spawnSidecarChild(options: {
       NODE_ENV: "production",
       PATH: resolvePackagedPathEnv(),
       ...(usesElectronAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
+  const generation = await spawnSidecar({
+    args: [options.entryPath],
+    command,
+    cwd: options.paths.runtimeRoot,
+    env: childEnv,
+    logFd: logHandle.fd,
+    resources: {
+      dataRoot: options.paths.dataRoot,
+      ownerPid: process.pid,
+      port: Number(options.env[
+        options.app === APP_KEYS.DAEMON ? SIDECAR_ENV.DAEMON_PORT : SIDECAR_ENV.WEB_PORT
+      ] ?? 0),
+      runtimeRoot: options.paths.runtimeRoot,
     },
     stamp,
   });
-  const child = spawn(
-    command,
-    [options.entryPath, ...createProcessStampArgs(stamp, OPEN_DESIGN_SIDECAR_CONTRACT)],
-    createPackagedSidecarSpawnOptions({
-      env: childEnv,
-      logFd: logHandle.fd,
-      paths: options.paths,
-    }),
-  );
 
-  await new Promise<void>((resolveSpawn, rejectSpawn) => {
-    child.once("error", rejectSpawn);
-    child.once("spawn", resolveSpawn);
-  });
-
-  return { app: options.app, child, ipcPath, logHandle, logPath };
+  return { app: options.app, child: generation.process, generation, logHandle, logPath, stamp };
 }
 
 export function createPackagedSidecarSpawnOptions(input: {
@@ -590,34 +808,35 @@ export function createPackagedSidecarSpawnOptions(input: {
   };
 }
 
-async function closeManagedChild(child: ManagedSidecarChild): Promise<void> {
+export async function closeManagedChild(child: ManagedSidecarChild): Promise<void> {
   const appendLifecycleLog = async (message: string): Promise<void> => appendSidecarLifecycleLog(child.logPath, message);
-  await appendLifecycleLog(`[open-design packaged] shutdown requested app=${child.app} pid=${child.child.pid ?? "unknown"}`);
   try {
-    await requestJsonIpc(child.ipcPath, { type: SIDECAR_MESSAGES.SHUTDOWN }, { timeoutMs: 1200 });
-  } catch {
-    // Fall through to process cleanup.
+    await appendLifecycleLog(`[open-design packaged] shutdown requested app=${child.app} pid=${child.child.pid ?? "unknown"}`);
+    // A daemon may briefly hold shutdown while committing a desktop handoff.
+    // The sidecar generation boundary still owns escalation; packaged only
+    // supplies a bounded grace appropriate for that lifecycle operation.
+    const stop = await child.generation.stop({ termGraceMs: child.app === APP_KEYS.DAEMON ? 30_000 : 5_000 });
+    if (stop.forcedPids.length > 0) {
+      await appendLifecycleLog(`[open-design packaged] graceful shutdown timed out app=${child.app} pid=${child.child.pid ?? "unknown"}; forced=${stop.forcedPids.join(",")}`);
+    }
+    if (stop.remainingPids.length > 0) {
+      throw new Error(`failed to stop packaged ${child.app} sidecar processes: ${stop.remainingPids.join(", ")}`);
+    }
+    await appendLifecycleLog(`[open-design packaged] exited app=${child.app} pid=${child.child.pid ?? "unknown"} code=${child.child.exitCode ?? "unknown"} signal=${child.child.signalCode ?? "none"}`);
+  } finally {
+    await child.logHandle.close().catch(() => undefined);
   }
-
-  if (!(await waitForProcessExit(child.child.pid, 5000))) {
-    await appendLifecycleLog(`[open-design packaged] shutdown timeout app=${child.app} pid=${child.child.pid ?? "unknown"}; forcing stop`);
-    await stopProcesses([child.child.pid]);
-  }
-
-  await appendLifecycleLog(`[open-design packaged] exited app=${child.app} pid=${child.child.pid ?? "unknown"} code=${child.child.exitCode ?? "unknown"} signal=${child.child.signalCode ?? "none"}`);
-  await child.logHandle.close().catch(() => undefined);
 }
 
 export async function registerPackagedWebUrl(
-  daemonIpcPath: string,
+  daemonStamp: SidecarStamp,
   webUrl: string,
+  invoke: typeof invokeSidecar = invokeSidecar,
 ): Promise<void> {
-  const result = await requestJsonIpc<RegisterWebUrlResult>(
-    daemonIpcPath,
-    {
-      input: { url: webUrl },
-      type: SIDECAR_MESSAGES.REGISTER_WEB_URL,
-    },
+  const result = await invoke<RegisterWebUrlResult>(
+    daemonStamp,
+    SIDECAR_MESSAGES.REGISTER_WEB_URL,
+    { url: webUrl },
     { timeoutMs: 1_200 },
   );
   if (result.accepted !== true) {
@@ -640,6 +859,8 @@ export async function startPackagedSidecars(
     telemetryRelayUrl: string | null;
     posthogKey: string | null;
     posthogHost: string | null;
+    velaWebUrl: string | null;
+    velaWebUrls?: Record<string, string>;
     /**
      * PR #974 round-5 (lefarcen P2): caller asserts whether a desktop
      * runtime is being started in this packaged process group. The
@@ -664,6 +885,9 @@ export async function startPackagedSidecars(
     onPhase?: (phase: "daemon-spawning" | "daemon-ready" | "web-spawning" | "web-ready") => void;
   },
 ): Promise<PackagedSidecarHandle> {
+  const channel = releaseChannelFromVersion(options.appVersion)
+    ?? releaseChannelFromNamespace(runtime.namespace, "default")
+    ?? "stable";
   await mkdir(paths.namespaceRoot, { recursive: true });
   await mkdir(paths.cacheRoot, { recursive: true });
   await mkdir(paths.dataRoot, { recursive: true });
@@ -675,6 +899,7 @@ export async function startPackagedSidecars(
   await mkdir(paths.electronSessionDataRoot, { recursive: true });
 
   const children: ManagedSidecarChild[] = [];
+  let webSupervisor: { close(): Promise<void> } | null = null;
 
   const daemonSidecarEntry =
     options.daemonSidecarEntry ?? resolveSidecarEntry("@open-design/daemon", "sidecar");
@@ -703,6 +928,7 @@ export async function startPackagedSidecars(
     options.onPhase?.("daemon-spawning");
     const daemon = await spawnSidecarChild({
       app: APP_KEYS.DAEMON,
+      channel,
       entryPath: daemonSidecarEntry,
       env: buildPackagedDaemonSpawnEnv(paths, {
         appVersion: options.appVersion,
@@ -717,6 +943,8 @@ export async function startPackagedSidecars(
         telemetryRelayUrl: options.telemetryRelayUrl,
         posthogKey: options.posthogKey,
         posthogHost: options.posthogHost,
+        velaWebUrl: options.velaWebUrl,
+        velaWebUrls: options.velaWebUrls,
       }),
       electronNodeCommand: options.electronNodeCommand,
       nodeCommand: options.nodeCommand,
@@ -736,7 +964,13 @@ export async function startPackagedSidecars(
       { log: prewarmLog },
     );
     const daemonStatus = await waitForStatus<DaemonStatusSnapshot>(
-      daemon.ipcPath,
+      {
+        label: APP_KEYS.DAEMON,
+        read: async (timeoutMs) => await getSidecarStatus<DaemonStatusSnapshot>(daemon.stamp, {
+          generationPid: daemon.generation.process.pid,
+          timeoutMs,
+        }),
+      },
       (status) => status.url != null,
       resolveDaemonStatusTimeoutMs(),
       // Race the IPC polling against the daemon child's exit. Without
@@ -753,48 +987,80 @@ export async function startPackagedSidecars(
     // enters its own timed status window.
     await webPrewarm;
 
-    options.onPhase?.("web-spawning");
-    const web = await spawnSidecarChild({
-      app: APP_KEYS.WEB,
-      entryPath: webSidecarEntry,
-      env: {
-        [SIDECAR_ENV.DAEMON_PORT]: extractPort(daemonStatus.url),
-        [SIDECAR_ENV.WEB_PORT]: "0",
-        ...(options.webStandaloneRoot == null ? {} : { OD_WEB_STANDALONE_ROOT: options.webStandaloneRoot }),
-        OD_WEB_OUTPUT_MODE: options.webOutputMode,
-        PORT: "0",
-      },
-      electronNodeCommand: options.electronNodeCommand,
-      nodeCommand: options.nodeCommand,
-      paths,
-      runtime,
+    // Resolved out here rather than inside `spawnWeb`: the null check
+    // above narrows `daemonStatus.url` to string, but TypeScript drops
+    // property narrowing inside a closure that could run later.
+    const daemonPort = extractPort(daemonStatus.url);
+
+    const supervisor = createWebSidecarSupervisor<ManagedSidecarChild, WebStatusSnapshot>({
+      closeChild: closeManagedChild,
+      hasExited: (web) => web.child.exitCode !== null || web.child.signalCode !== null,
+      onExit: (web, listener) => web.child.once("exit", listener),
+      registerUrl: async (url) => await registerPackagedWebUrl(daemon.stamp, url),
+      spawn: async () => await spawnSidecarChild({
+        app: APP_KEYS.WEB,
+        channel,
+        entryPath: webSidecarEntry,
+        env: {
+          [SIDECAR_ENV.DAEMON_PORT]: daemonPort,
+          [SIDECAR_ENV.WEB_PORT]: "0",
+          ...(options.webStandaloneRoot == null ? {} : { OD_WEB_STANDALONE_ROOT: options.webStandaloneRoot }),
+          OD_WEB_OUTPUT_MODE: options.webOutputMode,
+          PORT: "0",
+        },
+        electronNodeCommand: options.electronNodeCommand,
+        nodeCommand: options.nodeCommand,
+        paths,
+        runtime,
+      }),
+      waitUntilReady: async (web) => await waitForStatus<WebStatusSnapshot>(
+        {
+          label: APP_KEYS.WEB,
+          read: async (timeoutMs) => await getSidecarStatus<WebStatusSnapshot>(web.stamp, {
+            generationPid: web.generation.process.pid,
+            timeoutMs,
+          }),
+        },
+        (candidate) => candidate.url != null,
+        // Web has no legacy-migration path, so it uses the plain platform
+        // baseline (still widened on win32, where AV scanning can also slow the
+        // web sidecar's first bind) rather than resolveDaemonStatusTimeoutMs.
+        baseStatusTimeoutMs(),
+        { child: web.child, logPath: logPathFor(paths, APP_KEYS.WEB) },
+      ),
     });
-    children.push(web);
-    const webStatus = await waitForStatus<WebStatusSnapshot>(
-      web.ipcPath,
-      (status) => status.url != null,
-      // Web has no legacy-migration path, so it uses the plain platform
-      // baseline (still widened on win32, where AV scanning can also slow the
-      // web sidecar's first bind) rather than resolveDaemonStatusTimeoutMs.
-      baseStatusTimeoutMs(),
-      { child: web.child, logPath: logPathFor(paths, APP_KEYS.WEB) },
-    );
-    if (webStatus.url == null) throw new Error("web did not report a URL");
-    await registerPackagedWebUrl(daemon.ipcPath, webStatus.url);
+    webSupervisor = supervisor;
+
+    // Phase callbacks drive the splash screen, so they stay on the
+    // first-boot path only: a mid-session respawn must not rewind the
+    // user's splash back to "web-spawning".
+    options.onPhase?.("web-spawning");
+    const webStatus = await supervisor.start();
     options.onPhase?.("web-ready");
 
     return {
       daemon: daemonStatus,
       web: webStatus,
+      currentWebUrl: supervisor.currentUrl,
       async close() {
+        const closeErrors: unknown[] = [];
+        await supervisor.close().catch((error: unknown) => {
+          closeErrors.push(error);
+          console.error("failed to close packaged web sidecar", error);
+        });
         for (const child of [...children].reverse()) {
           await closeManagedChild(child).catch((error: unknown) => {
+            closeErrors.push(error);
             console.error(`failed to close packaged ${child.app} sidecar`, error);
           });
+        }
+        if (closeErrors.length > 0) {
+          throw new AggregateError(closeErrors, "failed to close packaged sidecars");
         }
       },
     };
   } catch (error) {
+    await webSupervisor?.close().catch(() => undefined);
     for (const child of [...children].reverse()) {
       await closeManagedChild(child).catch(() => undefined);
     }

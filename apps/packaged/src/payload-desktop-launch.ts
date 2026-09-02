@@ -1,9 +1,7 @@
-import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 
 import { buildLauncherAfterQuitArgs, buildLauncherDelegatedArgs } from "@open-design/launcher-proto";
-import { createProcessStampArgs } from "@open-design/platform";
-import { OPEN_DESIGN_SIDECAR_CONTRACT, type SidecarStamp } from "@open-design/sidecar-proto";
+import { handoffCurrentSidecarGeneration } from "@open-design/sidecar";
 
 import {
   armPackagedLauncherRuntimeAttempt,
@@ -13,6 +11,10 @@ import {
 
 const DEFAULT_DELEGATION_TIMEOUT_MS = 60_000;
 
+export function findPackagedDeeplinkArg(argv: readonly string[]): string | null {
+  return argv.find((arg) => arg.startsWith("opendesign://")) ?? null;
+}
+
 export type PackagedPayloadDesktopLaunchPlan = {
   args: string[];
   command: string;
@@ -21,9 +23,9 @@ export type PackagedPayloadDesktopLaunchPlan = {
 
 export function planPackagedPayloadDesktopDelegation(
   runtime: PackagedLauncherRuntime,
-  stamp: SidecarStamp,
   options: {
     currentPid?: number;
+    forwardedArgs?: readonly string[];
     timeoutMs?: number;
   } = {},
 ): PackagedPayloadDesktopLaunchPlan | null {
@@ -44,7 +46,13 @@ export function planPackagedPayloadDesktopDelegation(
       ...(runtime.selection.selected && runtime.selection.reason === "active"
         ? buildLauncherDelegatedArgs(runtime.selection.pointer)
         : []),
-      ...createProcessStampArgs(stamp, OPEN_DESIGN_SIDECAR_CONTRACT),
+      // The stable outer owns the OS protocol registration. On a cold start
+      // after a payload update, Electron delivers the invite URL to that outer
+      // process first; preserve only this explicit protocol argument when the
+      // outer delegates to the versioned payload.
+      ...(options.forwardedArgs ?? process.argv).filter((arg) =>
+        arg.startsWith("opendesign://")
+      ),
     ],
     command: runtime.desktopExecutablePath,
     cwd: dirname(runtime.desktopExecutablePath),
@@ -53,15 +61,15 @@ export function planPackagedPayloadDesktopDelegation(
 
 export async function launchPackagedPayloadDesktop(
   runtime: PackagedLauncherRuntime,
-  stamp: SidecarStamp,
   options: {
     currentPid?: number;
+    forwardedArgs?: readonly string[];
     recordFailedAttempt?: (runtime: PackagedLauncherRuntime) => Promise<void>;
-    spawn?: typeof spawn;
+    handoff?: typeof handoffCurrentSidecarGeneration;
     timeoutMs?: number;
   } = {},
 ): Promise<boolean> {
-  const plan = planPackagedPayloadDesktopDelegation(runtime, stamp, options);
+  const plan = planPackagedPayloadDesktopDelegation(runtime, options);
   if (plan == null) return false;
 
   // Pre-arm BEFORE spawn: a payload that spawns successfully but dies before
@@ -69,17 +77,12 @@ export async function launchPackagedPayloadDesktop(
   // evidence, and every later cold start would retry the same broken payload.
   await armPackagedLauncherRuntimeAttempt(runtime);
   try {
-    const child = (options.spawn ?? spawn)(plan.command, plan.args, {
+    await (options.handoff ?? handoffCurrentSidecarGeneration)({
+      args: plan.args,
+      command: plan.command,
       cwd: plan.cwd,
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    await new Promise<void>((resolveSpawn, rejectSpawn) => {
-      child.once("spawn", () => resolveSpawn());
-      child.once("error", rejectSpawn);
-    });
-    child.unref();
+      env: process.env,
+    }, { timeoutMs: options.timeoutMs ?? DEFAULT_DELEGATION_TIMEOUT_MS });
   } catch (error) {
     await (options.recordFailedAttempt ?? recordPackagedLauncherRuntimeFailedAttempt)(runtime);
     throw error;

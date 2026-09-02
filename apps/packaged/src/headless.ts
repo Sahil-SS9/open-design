@@ -3,18 +3,24 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  APP_KEYS,
   OPEN_DESIGN_SIDECAR_CONTRACT,
   SIDECAR_DEFAULTS,
+  SIDECAR_SOURCES,
 } from "@open-design/sidecar-proto";
+import { bootstrapSidecarProcess, readCurrentSidecarStamp } from "@open-design/sidecar";
+import { releaseChannelFromNamespace } from "@open-design/release";
 
 import {
   PACKAGED_NAMESPACE_ENV,
+  resolvePackagedAmrProfile,
   type PackagedConfig,
 } from "./config.js";
 import {
   parsePackagedHeadlessRequest,
   runPackagedHeadless,
 } from "./headless-runtime.js";
+import { resolvePackagedNamespacePaths } from "./paths.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -32,10 +38,7 @@ function resolveHeadlessNamespaceBaseRoot(): string {
 }
 
 function resolveHeadlessAmrProfile(): PackagedConfig["amrProfile"] {
-  const value = process.env.OPEN_DESIGN_AMR_PROFILE?.trim();
-  if (value == null || value.length === 0) return null;
-  if (value === "prod" || value === "test" || value === "local") return value;
-  throw new Error(`unsupported packaged AMR profile: ${value}`);
+  return resolvePackagedAmrProfile(process.env.OPEN_DESIGN_AMR_PROFILE);
 }
 
 function resolveHeadlessConfig(): PackagedConfig {
@@ -65,6 +68,14 @@ function resolveHeadlessConfig(): PackagedConfig {
     updateMetadataUrl: process.env.OD_UPDATE_METADATA_URL?.trim() || null,
     posthogKey: process.env.POSTHOG_KEY?.trim() || null,
     posthogHost: process.env.POSTHOG_HOST?.trim() || null,
+    velaWebUrl: process.env.OD_VELA_WEB_URL?.trim() || null,
+    velaWebUrls: (() => {
+      try {
+        return JSON.parse(process.env.OD_VELA_WEB_URLS ?? '{}') as Record<string, string>;
+      } catch {
+        return {};
+      }
+    })(),
     webSidecarEntry: null,
     webStandaloneRoot: null,
     webOutputMode: "server",
@@ -76,16 +87,34 @@ const headlessRequest = parsePackagedHeadlessRequest([
   ...process.argv.slice(2),
 ]);
 
-void runPackagedHeadless(
-  resolveHeadlessConfig(),
-  headlessRequest,
-  {
+async function main(): Promise<void> {
+  const config = resolveHeadlessConfig();
+  const paths = resolvePackagedNamespacePaths(config, config.namespace, process.env);
+  const currentStamp = (() => {
+    try { return readCurrentSidecarStamp(); } catch { return null; }
+  })();
+  const stamp = currentStamp ?? {
+    app: APP_KEYS.DESKTOP,
+    channel: releaseChannelFromNamespace(config.namespace, "default") ?? "stable",
+    mode: "headless",
+    namespace: config.namespace,
+    source: SIDECAR_SOURCES.PACKAGED,
+  };
+  if (await bootstrapSidecarProcess(stamp, {
+    dataRoot: paths.dataRoot,
+    ownerPid: null,
+    port: 0,
+    runtimeRoot: paths.runtimeRoot,
+  })) return;
+  await runPackagedHeadless(config, headlessRequest, {
     mcpBootstrapLaunch: {
       command: process.execPath,
       args: [fileURLToPath(import.meta.url), "--headless"],
     },
-  },
-).catch((error: unknown) => {
+  });
+}
+
+void main().catch((error: unknown) => {
   process.stderr.write(
     `open-design headless failed: ${
       error instanceof Error ? error.message : String(error)

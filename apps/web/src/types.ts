@@ -6,6 +6,7 @@ import type {
   AgentCliEnvIntentPrefs,
   AgentModelPrefs,
   AgentTestRequest,
+  AppRuntimeCapabilities,
   AppVersionInfo,
   AppVersionResponse,
   WhatsNewContent,
@@ -67,6 +68,7 @@ import type {
   PreviewAnnotationStyle,
   PreviewCommentSelectionKind,
   PreviewComment,
+  PreviewCommentAnchorState,
   PreviewCommentAttachment,
   PreviewCommentStatus,
   PreviewCommentTarget,
@@ -87,6 +89,7 @@ import type {
   SkillDetail,
   SkillSummary,
   InstallInput,
+  InstallSkillRequest,
   InstallSkillResponse,
   InstallDesignSystemResponse,
   UninstallResponse,
@@ -143,7 +146,7 @@ export function liveArtifactIdFromTabId(tabId: LiveArtifactTabId): string {
 // Side Chat tab convention. A `chat:<conversationId>` tab mounts a secondary
 // ChatPane bound to that conversation (Stage 2), mirroring the `live:` scheme
 // above. The conversation is a normal conversation, so it also shows up in the
-// header ConversationsMenu.
+// conversation list.
 export type SideChatTabId = `chat:${string}`;
 
 export function sideChatTabId(conversationId: string): SideChatTabId {
@@ -344,14 +347,13 @@ export interface PetCustom {
 }
 
 export interface NotificationsConfig {
-  // Master switch for the completion sound. Default false — first-run users
-  // hear nothing until they opt in.
+  // Master switch for the completion sound. Default true; users can opt out.
   soundEnabled: boolean;
   // Sound id played when a turn ends with `runStatus === 'succeeded'`.
   successSoundId: string;
   // Sound id played when a turn ends with `runStatus === 'failed'`.
   failureSoundId: string;
-  // Master switch for the browser Notification API banner. Default false.
+  // Master switch for the browser Notification API banner. Default true.
   desktopEnabled: boolean;
 }
 
@@ -361,6 +363,10 @@ export interface OrbitConfig {
   time: string;
   /** Optional skill id from the examples gallery where scenario === "orbit". */
   templateSkillId?: string | null;
+  workspaceScope?: {
+    workspaceId: string;
+    workspaceMemberId: string;
+  } | null;
 }
 
 export interface PetConfig {
@@ -381,10 +387,6 @@ export interface PetConfig {
 export interface AppConfig {
   mode: ExecMode;
   apiKey: string;
-  /** Non-secret daemon-owned credential profile selected for BYOK runs. */
-  byokProfileId?: string;
-  byokCredentialConfigured?: boolean;
-  byokCredentialTail?: string;
   baseUrl: string;
   model: string;
   apiProtocol?: ApiProtocol;
@@ -581,6 +583,7 @@ export type {
   AgentDiagnostic,
   AgentFixIntent,
   AgentTestRequest,
+  AppRuntimeCapabilities,
   AppVersionInfo,
   AppVersionResponse,
   WhatsNewContent,
@@ -620,6 +623,7 @@ export type {
   Project,
   ProjectPlatform,
   PreviewComment,
+  PreviewCommentAnchorState,
   PreviewCommentAttachment,
   PreviewCommentStatus,
   PreviewCommentTarget,
@@ -644,6 +648,7 @@ export type {
   SkillDetail,
   SkillSummary,
   InstallInput,
+  InstallSkillRequest,
   InstallSkillResponse,
   InstallDesignSystemResponse,
   UninstallResponse,

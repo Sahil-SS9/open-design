@@ -4,8 +4,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ProjectView, mergeSavedPreviewComment } from '../../src/components/ProjectView';
+import {
+  ProjectView,
+  listConversationsWithRetry,
+  mergeSavedPreviewComment,
+} from '../../src/components/ProjectView';
+import { ProjectConversationsHttpError } from '../../src/state/projects';
 import type { SettingsSection } from '../../src/components/SettingsDialog';
+import type { ProjectWorkspaceScopeState } from '../../src/collab/useProjectWorkspaceScope';
+import type { WorkspaceCollabContext } from '@open-design/contracts';
+import type { AmrAuthRetryContinuation } from '../../src/runtime/amr-auth-retry-continuation';
 import type {
   AgentInfo,
   AppConfig,
@@ -43,6 +51,102 @@ const saveTabs = vi.fn();
 const playSound = vi.fn();
 const showCompletionNotification = vi.fn();
 const analyticsTrackMock = vi.fn();
+/** What the inline question form was told about each answer it handed over. */
+const questionFormSubmitOutcomes: Array<boolean | void> = [];
+const useProjectFileEvents = vi.fn();
+const workspaceScopeMocks = vi.hoisted(() => {
+  const personalContext = (): WorkspaceCollabContext & {
+    workspaceType: 'personal';
+  } => ({
+    workspaceId: 'workspace-personal',
+    workspaceMemberId: 'member-personal',
+    workspaceType: 'personal',
+    role: 'owner',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: null,
+    providerMode: 'platform_credits',
+    seatSummary: {
+      seatLimit: 1,
+      usedSeats: 1,
+      availableSeats: 0,
+      isSeatFull: true,
+    },
+    permissions: {
+      canManageMembers: true,
+      canManageBilling: true,
+      canInviteMembers: true,
+      canManageAutoRecharge: true,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: true,
+    },
+  });
+  return {
+    personalContext,
+    ambientContext: null as WorkspaceCollabContext | null,
+    ambientLoading: false,
+    ambientFailure: null as 'unsupported' | 'unavailable' | null,
+    projectScope: {
+      loading: false,
+      scope: {
+        kind: 'personal' as const,
+        projectId: 'project-1',
+        workspaceId: 'workspace-personal',
+        visibility: 'personal' as const,
+        context: personalContext(),
+      },
+    } as ProjectWorkspaceScopeState,
+  };
+});
+
+function stubAuthoritativePersonalWorkspaceBalance(balanceUsd: string): void {
+  const observedAt = '2026-07-26T00:00:00.000Z';
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), 'http://localhost');
+    if (url.pathname !== '/api/workspace/billing') {
+      throw new Error(`Unexpected fetch: ${String(input)}`);
+    }
+    return new Response(JSON.stringify({
+      summary: null,
+      workspaceBalance: {
+        workspaceId: 'workspace-personal',
+        workspaceMemberId: 'member-personal',
+        balanceUsd,
+        billingScopeVersion: 2,
+        expiresAt: null,
+        updatedAt: observedAt,
+      },
+      workspaceRuntime: {
+        workspaceId: 'workspace-personal',
+        workspaceMemberId: 'member-personal',
+        status: 'fresh',
+        revision: '1',
+        observedAt,
+        softExpiresAt: '2099-07-26T00:00:30.000Z',
+        hardExpiresAt: '2099-07-26T00:02:00.000Z',
+        retryAt: null,
+        errorCode: null,
+        reason: 'authoritative-action-read',
+        sourceGapDetected: false,
+      },
+      authoritativeWorkspaceRead: {
+        workspaceId: 'workspace-personal',
+        workspaceMemberId: 'member-personal',
+        observedAt,
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }));
+}
+const projectCollabMocks = vi.hoisted(() => ({
+  enabled: false,
+  syncState: 'local_only' as 'local_only' | 'synced' | null,
+  viewerOnly: false,
+  isOwner: false,
+  writerAuthority: 'allowed' as 'allowed' | 'denied' | 'pending',
+}));
 
 vi.mock('../../src/analytics/provider', () => ({
   useAnalytics: () => ({
@@ -63,6 +167,63 @@ vi.mock('../../src/providers/anthropic', () => ({
   streamMessage: (...args: unknown[]) => streamMessage(...args),
 }));
 
+vi.mock('../../src/collab/useWorkspaceContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/collab/useWorkspaceContext')>()),
+  useWorkspaceContext: () => ({
+    context: workspaceScopeMocks.ambientContext,
+    loading: workspaceScopeMocks.ambientLoading,
+    ...(workspaceScopeMocks.ambientFailure
+      ? { failure: workspaceScopeMocks.ambientFailure }
+      : {}),
+  }),
+  // This suite exercises run/conversation isolation, not remote collaboration.
+  // An authoritative empty catalog proves the fixture project is unshared so
+  // the collab status request's initial unknown window does not disable Chat.
+  lastResolvedTeamProjects: () => [],
+  lastResolvedWorkspaceContext: () => workspaceScopeMocks.ambientContext,
+  // Mirrors the real predicate: only a settled, authoritative "no workspace"
+  // read means AMR has no wallet.
+  workspaceIdentityCanBillAmr: (state: {
+    context: unknown;
+    loading: boolean;
+    failure?: string;
+  }) => state.context !== null || state.loading || Boolean(state.failure),
+  useWorkspaceBilling: () => null,
+}));
+
+// Only the HOOK is stubbed; every pure helper comes from the real module.
+//
+// This factory used to hand-list each export, and that cost three separate
+// debugging rounds: adding ONE export to `useProjectWorkspaceScope` made all 64
+// tests in this file fail with "not a function" at render, and the hand-written
+// copies were free to drift from the semantics under test. `importOriginal`
+// removes the whole failure mode — a new export is picked up automatically and
+// is always the real implementation.
+vi.mock('../../src/collab/useProjectWorkspaceScope', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/collab/useProjectWorkspaceScope')>()),
+  useProjectWorkspaceScope: () => workspaceScopeMocks.projectScope,
+}));
+
+vi.mock('../../src/collab/useProjectCollab', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/collab/useProjectCollab')>()),
+  useProjectCollab: () => ({
+    enabled: projectCollabMocks.enabled,
+    member: null,
+    present: [],
+    publishedVersion: null,
+    syncState: projectCollabMocks.syncState,
+    viewerOnly: projectCollabMocks.viewerOnly,
+    isOwner: projectCollabMocks.isOwner,
+    writerAuthority: projectCollabMocks.writerAuthority,
+    downloadPending: false,
+    reportChange: vi.fn(),
+    requestPublish: vi.fn(),
+    refreshPresence: vi.fn(),
+    checkStatusNow: vi.fn(),
+    applyContentTransferState: vi.fn(),
+  }),
+}));
+
 vi.mock('../../src/providers/daemon', () => ({
   GENERIC_DAEMON_DISCONNECT_CODE: 'GENERIC_DAEMON_DISCONNECT',
   GENERIC_DAEMON_DISCONNECT_MESSAGE: 'daemon stream disconnected before run completed',
@@ -79,7 +240,7 @@ vi.mock('../../src/providers/daemon', () => ({
 }));
 
 vi.mock('../../src/providers/project-events', () => ({
-  useProjectFileEvents: vi.fn(),
+  useProjectFileEvents: (...args: unknown[]) => useProjectFileEvents(...args),
 }));
 
 vi.mock('../../src/utils/notifications', async (importOriginal) => ({
@@ -104,7 +265,8 @@ vi.mock('../../src/router', () => ({
   navigate: vi.fn(),
 }));
 
-vi.mock('../../src/state/projects', () => ({
+vi.mock('../../src/state/projects', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/state/projects')>()),
   createConversation: (...args: unknown[]) => createConversation(...args),
   deleteConversation: vi.fn(),
   getTemplate: (...args: unknown[]) => getTemplate(...args),
@@ -252,6 +414,7 @@ vi.mock('../../src/components/ChatPane', () => ({
     onNewConversation,
     error,
     onRetry,
+    onSubmitQuestionForm,
   }: {
     activeConversationId: string | null;
     conversations: Conversation[];
@@ -278,6 +441,13 @@ vi.mock('../../src/components/ChatPane', () => ({
     onSendQueuedNow?: (id: string) => void;
     onNewConversation: () => void;
     onRetry?: (message: ChatMessage) => void;
+    onSubmitQuestionForm?: (
+      text: string,
+      attachments?: unknown[],
+      context?: unknown,
+      sourceAssistantMessageId?: string,
+      formId?: string,
+    ) => boolean | void | Promise<boolean | void>;
   }) => {
     const attached = attachedComments ?? [];
     const retryTarget = [...(messages ?? [])]
@@ -327,6 +497,12 @@ vi.mock('../../src/components/ChatPane', () => ({
                 ...(message.producedFiles ?? []).map((file) => file.name),
               ].join('|'),
             )
+            .join('\n')}
+        </output>
+        <output data-testid="user-messages">
+          {(messages ?? [])
+            .filter((message) => message.role === 'user')
+            .map((message) => message.content)
             .join('\n')}
         </output>
         <output data-testid="attached-comment-count">{attached.length}</output>
@@ -458,6 +634,40 @@ vi.mock('../../src/components/ChatPane', () => ({
         >
           send with context
         </button>
+        <button
+          type="button"
+          data-testid="send-message-stable-request"
+          onClick={() =>
+            onSend(
+              'hello from stable request',
+              [],
+              [],
+              { clientRequestId: 'submission-1' },
+            )
+          }
+          disabled={sendDisabled}
+        >
+          send stable request
+        </button>
+        <button
+          type="button"
+          data-testid="submit-question-form"
+          onClick={() => {
+            void Promise.resolve(
+              onSubmitQuestionForm?.(
+                'Audience: Designers',
+                [],
+                undefined,
+                'assistant-brief',
+                'travel_app_brief',
+              ),
+            ).then((accepted) => {
+              questionFormSubmitOutcomes.push(accepted);
+            });
+          }}
+        >
+          submit question form
+        </button>
         <button type="button" data-testid="new-conversation" onClick={onNewConversation}>
           new
         </button>
@@ -469,8 +679,6 @@ vi.mock('../../src/components/ChatPane', () => ({
 const config: AppConfig = {
   mode: 'daemon',
   apiKey: '',
-  byokProfileId: 'byok-test-profile',
-  byokCredentialConfigured: true,
   baseUrl: '',
   model: '',
   agentId: 'agent-1',
@@ -507,6 +715,46 @@ const createdConversation: Conversation = {
   updatedAt: 2,
 };
 
+type TeamProjectWorkspaceContext = Extract<
+  NonNullable<ProjectWorkspaceScopeState['scope']>,
+  { kind: 'team' }
+>['context'];
+
+function teamWorkspaceContext(
+  workspaceId: string,
+  workspaceMemberId: string,
+): TeamProjectWorkspaceContext {
+  return {
+    workspaceId,
+    workspaceType: 'team',
+    workspaceMemberId,
+    role: 'member',
+    memberStatus: 'active',
+    lifecycleState: 'active',
+    billingState: 'active',
+    planId: 'team_pro',
+    providerMode: 'platform_credits',
+    seatSummary: {
+      seatLimit: 5,
+      usedSeats: 2,
+      availableSeats: 3,
+      isSeatFull: false,
+    },
+    permissions: {
+      canManageMembers: false,
+      canManageBilling: false,
+      canInviteMembers: false,
+      canManageAutoRecharge: false,
+      canShareProjects: true,
+      canWriteSyncedFiles: true,
+      canViewWorkspaceSettings: true,
+      canManageSharedResources: false,
+    },
+    teamId: workspaceId,
+    teamName: workspaceId,
+  };
+}
+
 const runningAssistant: ChatMessage = {
   id: 'assistant-a',
   role: 'assistant',
@@ -520,7 +768,10 @@ const succeededAssistant: ChatMessage = {
   ...runningAssistant,
   content: 'done',
   runStatus: 'succeeded',
-  endedAt: 2,
+  // Realistic terminal timestamp: a synthetic epoch value would read as years
+  // old to designDeliveryReconciliationStale's age bound and suppress the
+  // reload reconciliation these suites exercise.
+  endedAt: Date.now(),
 };
 
 const previewComment: PreviewComment = {
@@ -566,14 +817,81 @@ describe('mergeSavedPreviewComment', () => {
   });
 });
 
+describe('listConversationsWithRetry', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    listConversations.mockReset();
+  });
+
+  it('fails permanent authorization errors immediately', async () => {
+    listConversations.mockRejectedValueOnce(
+      new ProjectConversationsHttpError(403),
+    );
+
+    await expect(listConversationsWithRetry('project-1')).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(listConversations).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a transient materialization 404 on the bounded schedule', async () => {
+    vi.useFakeTimers();
+    const teamContext = teamWorkspaceContext('workspace-team', 'member-team');
+    listConversations
+      .mockRejectedValueOnce(new ProjectConversationsHttpError(404))
+      .mockResolvedValueOnce(conversations);
+
+    const result = listConversationsWithRetry('project-1', teamContext);
+    await Promise.resolve();
+    expect(listConversations).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(119);
+    expect(listConversations).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(result).resolves.toEqual(conversations);
+    expect(listConversations).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a missing Personal project', async () => {
+    listConversations.mockRejectedValueOnce(
+      new ProjectConversationsHttpError(404),
+    );
+
+    await expect(listConversationsWithRetry('project-1')).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(listConversations).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('ProjectView conversation run isolation', () => {
   let resolveConversationBMessages: ((messages: ChatMessage[]) => void) | null = null;
   let conversationAMessages: ChatMessage[] = [runningAssistant];
 
   beforeEach(() => {
     window.localStorage.clear();
+    workspaceScopeMocks.ambientContext = null;
+    workspaceScopeMocks.ambientLoading = false;
+    workspaceScopeMocks.ambientFailure = null;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'personal',
+        projectId: project.id,
+        workspaceId: 'workspace-personal',
+        visibility: 'personal',
+        context: workspaceScopeMocks.personalContext(),
+      },
+    };
+    projectCollabMocks.enabled = false;
+    projectCollabMocks.syncState = 'local_only';
+    projectCollabMocks.viewerOnly = false;
+    projectCollabMocks.isOwner = false;
+    projectCollabMocks.writerAuthority = 'allowed';
     resolveConversationBMessages = null;
     conversationAMessages = [runningAssistant];
+    questionFormSubmitOutcomes.length = 0;
     listConversations.mockResolvedValue(conversations);
     listMessages.mockImplementation(async (_projectId: string, conversationId: string) => {
       if (conversationId === 'conv-a') return conversationAMessages;
@@ -617,6 +935,7 @@ describe('ProjectView conversation run isolation', () => {
       stale: false,
       source: 'vela_api',
     });
+    stubAuthoritativePersonalWorkspaceBalance('10.00');
     launchAntigravityOauth.mockResolvedValue({ ok: true });
     streamViaDaemon.mockImplementation(async () => {});
   });
@@ -625,6 +944,7 @@ describe('ProjectView conversation run isolation', () => {
     cleanup();
     window.localStorage.clear();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
   });
 
@@ -658,6 +978,468 @@ describe('ProjectView conversation run isolation', () => {
         conversationId: 'conv-b',
         locale: 'zh-CN',
       }),
+    );
+  });
+
+  it.each([
+    ['an old daemon', 'unsupported' as const],
+    ['a revoked scope response', 'forbidden' as const],
+    ['a workspace-directory outage', 'unavailable' as const],
+  ])('keeps non-AMR runs available with %s', async (_label, failure) => {
+    conversationAMessages = [];
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: null,
+      failure,
+    };
+
+    renderProjectView();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('send-message')).toHaveProperty(
+        'disabled',
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('send-message'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+  });
+
+  const signedOutUnboundNonAmrCases: Array<{
+    label: string;
+    renderConfig: AppConfig;
+    renderAgents: AgentInfo[];
+    expectedAgentId: string;
+  }> = [
+    {
+      label: 'Claude',
+      renderConfig: { ...config, agentId: 'claude' },
+      renderAgents: [{
+        id: 'claude',
+        name: 'Claude',
+        bin: 'claude',
+        available: true,
+        models: [],
+      }],
+      expectedAgentId: 'claude',
+    },
+    {
+      label: 'Codex',
+      renderConfig: { ...config, agentId: 'codex' },
+      renderAgents: [{
+        id: 'codex',
+        name: 'Codex',
+        bin: 'codex',
+        available: true,
+        models: [],
+      }],
+      expectedAgentId: 'codex',
+    },
+    {
+      label: 'OpenCode',
+      renderConfig: { ...config, agentId: 'opencode' },
+      renderAgents: [{
+        id: 'opencode',
+        name: 'OpenCode',
+        bin: 'opencode',
+        available: true,
+        models: [],
+      }],
+      expectedAgentId: 'opencode',
+    },
+    {
+      label: 'BYOK',
+      renderConfig: {
+        ...config,
+        mode: 'api',
+        apiProtocol: 'openai',
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-test',
+      },
+      renderAgents: [{
+        id: 'byok-opencode',
+        name: 'BYOK OpenCode',
+        bin: 'opencode',
+        available: true,
+        models: [],
+      }],
+      expectedAgentId: 'byok-opencode',
+    },
+  ];
+
+  it.each(signedOutUnboundNonAmrCases)(
+    'keeps signed-out, headerless, unbound $label runs outside the AMR gates',
+    async ({ renderConfig, renderAgents, expectedAgentId }) => {
+      conversationAMessages = [];
+      workspaceScopeMocks.ambientContext = null;
+      workspaceScopeMocks.ambientLoading = false;
+      workspaceScopeMocks.ambientFailure = null;
+      workspaceScopeMocks.projectScope = {
+        loading: false,
+        scope: {
+          kind: 'unbound',
+          projectId: project.id,
+          workspaceId: null,
+          context: null,
+        },
+      };
+      // BYOK's best-effort memory extraction stays entirely in-process.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+      renderProjectView(renderConfig, project, renderAgents);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'),
+      );
+      expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false);
+      fireEvent.click(screen.getByTestId('send-message'));
+
+      await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+      expect(fetchAmrWalletSnapshot).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
+      expect(screen.queryByTestId('amr-low-balance-dialog')).toBeNull();
+      expect(streamViaDaemon).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: expectedAgentId,
+          workspaceContext: null,
+        }),
+      );
+    },
+  );
+
+  it('preserves the configured system notification for a background completion', async () => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+
+    renderProjectView({
+      ...config,
+      notifications: {
+        ...config.notifications!,
+        desktopEnabled: true,
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
+
+    fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+    resolveConversationBMessages?.([]);
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('idle'));
+
+    conversationAMessages = [succeededAssistant];
+    fireEvent.click(screen.getByTestId('conversation-select-conv-a'));
+
+    await waitFor(() => expect(playSound).toHaveBeenCalledWith('success-sound'));
+    expect(showCompletionNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded', body: 'done' }),
+    );
+  });
+
+  // An OpenDesign Cloud run is billed to the CALLER's own wallet. The gate must
+  // therefore ask about the caller's identity, not about this project's
+  // workspace scope — a project whose scope is unresolved says nothing about
+  // whether the signed-in user can pay, and holding the send closed there just
+  // produced a dead button (21f452ffe). Cases below pin the narrowed rule.
+  const amrAgents = [{
+    id: 'amr',
+    name: 'AMR',
+    bin: 'amr',
+    available: true,
+    models: [{ id: 'glm-5', label: 'GLM 5' }],
+  }];
+
+  it.each([
+    [
+      'an unbound project',
+      {
+        loading: false,
+        scope: {
+          kind: 'unbound' as const,
+          projectId: project.id,
+          workspaceId: null,
+          context: null,
+        },
+      },
+    ],
+    [
+      'a project pinned to a workspace the caller is not in',
+      {
+        loading: false,
+        scope: {
+          kind: 'unavailable' as const,
+          projectId: project.id,
+          workspaceId: 'workspace-elsewhere',
+          visibility: 'personal' as const,
+          context: null,
+        },
+      },
+    ],
+    [
+      'a workspace-directory outage',
+      { loading: false, scope: null, failure: 'unavailable' as const },
+    ],
+  ])(
+    'lets a signed-in user send an AMR run with %s — they are spending their own quota',
+    async (_label, projectScope) => {
+      conversationAMessages = [];
+      // Signed in: there IS a wallet. This is the whole difference from the
+      // signed-out case below.
+      workspaceScopeMocks.ambientContext = teamWorkspaceContext(
+        'workspace-team',
+        'member-team',
+      );
+      workspaceScopeMocks.projectScope = projectScope;
+
+      renderProjectView({ ...config, agentId: 'amr' }, project, amrAgents);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false),
+      );
+      fireEvent.click(screen.getByTestId('send-message'));
+      await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    },
+  );
+
+  it('lets the daemon explicitly reject unbound adoption for a genuinely signed-out caller', async () => {
+    conversationAMessages = [];
+    // An unbound project has no safe wallet for a client-side preflight. Do not
+    // reinterpret it as the account wallet or dead-button the request: the
+    // daemon owns the explicit adoption/authentication rejection.
+    workspaceScopeMocks.ambientContext = null;
+    workspaceScopeMocks.ambientLoading = false;
+    workspaceScopeMocks.ambientFailure = null;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'unbound',
+        projectId: project.id,
+        workspaceId: null,
+        context: null,
+      },
+    };
+
+    renderProjectView({ ...config, agentId: 'amr' }, project, amrAgents);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'),
+    );
+    expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false);
+    fireEvent.click(screen.getByTestId('send-message'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(fetchAmrWalletSnapshot).not.toHaveBeenCalled();
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceContext: null }),
+    );
+  });
+
+  it.each([
+    ['an identity read still in flight', { loading: true, failure: null }],
+    ['a transient identity outage', { loading: false, failure: 'unavailable' as const }],
+    ['an old daemon with no workspace endpoint', { loading: false, failure: 'unsupported' as const }],
+  ])(
+    'does not disable the AMR send on %s — an unsettled read is not a signed-out user',
+    async (_label, identity) => {
+      conversationAMessages = [];
+      workspaceScopeMocks.ambientContext = null;
+      workspaceScopeMocks.ambientLoading = identity.loading;
+      workspaceScopeMocks.ambientFailure = identity.failure;
+      workspaceScopeMocks.projectScope = {
+        loading: false,
+        scope: {
+          kind: 'unbound',
+          projectId: project.id,
+          workspaceId: null,
+          context: null,
+        },
+      };
+
+      renderProjectView({ ...config, agentId: 'amr' }, project, amrAgents);
+
+      await waitFor(() =>
+        expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false),
+      );
+    },
+  );
+
+  it.each([
+    [
+      'an old daemon',
+      { loading: false, scope: null, failure: 'unsupported' as const },
+    ],
+    [
+      'a workspace-directory outage',
+      { loading: false, scope: null, failure: 'unavailable' as const },
+    ],
+  ])(
+    'fails closed for a SIGNED-OUT AMR caller when project authority is %s',
+    async (_label, projectScope) => {
+    conversationAMessages = [];
+    // `ambientContext` stays null from beforeEach: no cloud identity, so no
+    // wallet. The project's own scope is not what closes the gate here.
+    workspaceScopeMocks.projectScope = projectScope;
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      project,
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('active-conversation').textContent).toBe(
+        'conv-a',
+      ),
+    );
+    expect(screen.getByTestId('send-message')).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByTestId('send-message'));
+    expect(streamViaDaemon).not.toHaveBeenCalled();
+  },
+  );
+
+  it('uses the project-bound workspace instead of the ambient workspace for run authorization', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+
+    renderProjectView(config, { ...project, workspaceId: workspaceA.workspaceId });
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: project.id,
+        workspaceContext: workspaceA,
+      }),
+    );
+  });
+
+  it('checks the project-bound team wallet instead of the ambient workspace wallet', async () => {
+    conversationAMessages = [];
+    const workspaceA = teamWorkspaceContext('workspace-a', 'member-a');
+    const workspaceB = teamWorkspaceContext('workspace-b', 'member-b');
+    workspaceScopeMocks.ambientContext = workspaceB;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: workspaceA.workspaceId,
+        visibility: 'personal',
+        context: workspaceA,
+      },
+    };
+    // A team-scoped preflight only accepts a wallet whose epoch is proven for
+    // the exact workspace/member it asked about: the daemon must echo a fresh
+    // `workspaceRuntime` plus the `authoritativeWorkspaceRead` that proves this
+    // very response completed the requested refresh (e65b168c3). Anything less
+    // fails closed, so the fixture has to speak that shape.
+    const observedAt = '2026-07-26T00:00:00.000Z';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/workspace/billing')) {
+        const workspaceId = new URL(url, 'http://localhost').searchParams.get('workspaceId');
+        const workspaceMemberId = workspaceId === workspaceA.workspaceId ? 'member-a' : 'member-b';
+        return new Response(JSON.stringify({
+          summary: null,
+          workspaceBalance: {
+            workspaceId,
+            workspaceMemberId,
+            balanceUsd: '10.00',
+            billingScopeVersion: 2,
+            expiresAt: null,
+            updatedAt: observedAt,
+          },
+          workspaceRuntime: {
+            workspaceId,
+            workspaceMemberId,
+            status: 'fresh',
+            revision: '4',
+            observedAt,
+            softExpiresAt: '2099-07-26T00:00:30.000Z',
+            hardExpiresAt: '2099-07-26T00:02:00.000Z',
+            retryAt: null,
+            errorCode: null,
+            reason: 'authoritative-action-read',
+            sourceGapDetected: false,
+          },
+          authoritativeWorkspaceRead: {
+            workspaceId,
+            workspaceMemberId,
+            observedAt,
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      { ...project, workspaceId: workspaceA.workspaceId },
+      [{
+        id: 'amr',
+        name: 'AMR',
+        bin: 'amr',
+        available: true,
+        models: [{ id: 'glm-5', label: 'GLM 5' }],
+      }],
+    );
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining(`workspaceId=${encodeURIComponent(workspaceA.workspaceId)}`),
+      { cache: 'no-store' },
+    );
+    // The ambient workspace must never be consulted for a project bound to
+    // another one, and the run has to spawn under the same workspace the
+    // wallet was checked against.
+    const billingUrls = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes('/api/workspace/billing'));
+    expect(billingUrls.length).toBeGreaterThan(0);
+    expect(
+      billingUrls.filter((url) =>
+        url.includes(`workspaceId=${encodeURIComponent(workspaceB.workspaceId)}`),
+      ),
+    ).toHaveLength(0);
+    expect(streamViaDaemon).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceContext: workspaceA }),
     );
   });
 
@@ -698,10 +1480,8 @@ describe('ProjectView conversation run isolation', () => {
     );
   });
 
-  it('hard-blocks the AMR send and shows the balance dialog when the wallet is empty', async () => {
+  it('lets Vela decide a selected Personal model when the wallet is empty', async () => {
     conversationAMessages = [];
-    // Both the cached read and the refresh confirmation report an empty
-    // wallet, so the send must be hard-blocked before any run spawns.
     fetchAmrWalletSnapshot.mockResolvedValue({
       status: 'available',
       profile: 'prod',
@@ -712,6 +1492,7 @@ describe('ProjectView conversation run isolation', () => {
       stale: false,
       source: 'vela_api',
     });
+    stubAuthoritativePersonalWorkspaceBalance('0');
     renderProjectView(
       { ...config, agentId: 'amr' },
       project,
@@ -731,11 +1512,11 @@ describe('ProjectView conversation run isolation', () => {
 
     fireEvent.click(screen.getByTestId('send-message'));
 
-    await waitFor(() => expect(screen.getByTestId('amr-balance-dialog')).toBeTruthy());
-    expect(streamViaDaemon).not.toHaveBeenCalled();
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('amr-balance-dialog')).toBeNull();
   });
 
-  it('soft-warns on a low AMR wallet and proceeds with the same send on confirmation', async () => {
+  it('does not guess whether a selected Personal model is metered at low balance', async () => {
     conversationAMessages = [];
     fetchAmrWalletSnapshot.mockResolvedValue({
       status: 'available',
@@ -747,6 +1528,7 @@ describe('ProjectView conversation run isolation', () => {
       stale: false,
       source: 'vela_api',
     });
+    stubAuthoritativePersonalWorkspaceBalance('1.20');
     renderProjectView(
       { ...config, agentId: 'amr' },
       project,
@@ -766,13 +1548,8 @@ describe('ProjectView conversation run isolation', () => {
 
     fireEvent.click(screen.getByTestId('send-message'));
 
-    // The reminder holds the send: no run yet.
-    await waitFor(() => expect(screen.getByTestId('amr-low-balance-dialog')).toBeTruthy());
-    expect(streamViaDaemon).not.toHaveBeenCalled();
-
-    // "Start anyway" resolves the pending send — the run starts without a re-submit.
-    fireEvent.click(screen.getByTestId('amr-low-balance-dialog-proceed'));
     await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('amr-low-balance-dialog')).toBeNull();
     expect(streamViaDaemon).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: 'amr' }),
     );
@@ -790,6 +1567,7 @@ describe('ProjectView conversation run isolation', () => {
       stale: false,
       source: 'vela_api',
     });
+    stubAuthoritativePersonalWorkspaceBalance('1.20');
     renderProjectView(
       { ...config, agentId: 'amr' },
       project,
@@ -888,6 +1666,141 @@ describe('ProjectView conversation run isolation', () => {
     expect(streamViaDaemon).not.toHaveBeenCalled();
   });
 
+  it('identifies a question-form answer by its occurrence, not by a fresh id', async () => {
+    // "At most one user answer message and one non-failed run per
+    // sourceAssistantMessageId + formId" cannot be a property of the form's
+    // own lock: a second tab, a denied-storage reload, or a queue replay all
+    // reach the host without it. Deriving the send's ids from the occurrence
+    // makes the guarantee a property of the request instead — the queue dedupes
+    // on `clientRequestId`, the answer row keeps one `userMessageId`, and the
+    // daemon's createOrReuse collapses the second send onto the first run.
+    conversationAMessages = [];
+
+    renderProjectView();
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('submit-question-form'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    const first = streamViaDaemon.mock.calls[0]![0] as Record<string, unknown>;
+
+    // Leaving the project and coming back is the reported path back into the
+    // same form. A freshly mounted view must not mint a fresh identity for it.
+    cleanup();
+    renderProjectView();
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('submit-question-form'));
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(2));
+    const second = streamViaDaemon.mock.calls[1]![0] as Record<string, unknown>;
+
+    // The run key is the occurrence: `createOrReuse` collapses the second
+    // send onto the first run instead of spawning another.
+    expect(first.clientRequestId).toBeTruthy();
+    expect(second.clientRequestId).toBe(first.clientRequestId);
+    // The answer row carries the same identity and is written `createOnly`,
+    // so the daemon — not this view — decides which answer survives.
+    expect(second.userMessageId).toBe(first.userMessageId);
+    const claims = saveMessage.mock.calls.filter(
+      (call) => (call[3] as { createOnly?: boolean } | undefined)?.createOnly === true,
+    );
+    expect(claims).toHaveLength(2);
+    expect(claims.every((call) => (call[2] as { id: string }).id === first.userMessageId)).toBe(true);
+  });
+
+  it('adopts the answer that actually ran when another submitter claimed the occurrence first', async () => {
+    // The losing tab must not keep showing an answer no run ever read.
+    conversationAMessages = [];
+    saveMessage.mockImplementation(async (_p: string, _c: string, message: ChatMessage) => ({
+      ...message,
+      content: '[form answers — travel_app_brief]\n- Audience: Founders',
+    }));
+
+    renderProjectView();
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+    fireEvent.click(screen.getByTestId('submit-question-form'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('user-messages').textContent).toContain('Audience: Founders'),
+    );
+    expect(screen.getByTestId('user-messages').textContent).not.toContain('Audience: Designers');
+  });
+
+  it('reports a question-form answer parked in the queue as accepted', async () => {
+    // The inline form holds the only copy of its answer. Leaving the project
+    // while the pre-run gate is still deciding parks that answer in the
+    // conversation queue — a durable acceptance, not a refusal. Reporting a
+    // refusal instead re-opens the form (and rolls back any file it uploaded
+    // for a send the queue still points at), so the user answers a second
+    // time and the drain sends the same brief twice.
+    conversationAMessages = [];
+    let resolveWallet: (snapshot: unknown) => void = () => {};
+    fetchAmrWalletSnapshot.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveWallet = resolve;
+        }),
+    );
+    renderProjectView(
+      { ...config, agentId: 'amr' },
+      project,
+      [
+        {
+          id: 'amr',
+          name: 'AMR',
+          bin: 'amr',
+          available: true,
+          models: [{ id: 'glm-5', label: 'GLM 5' }],
+        },
+      ],
+    );
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+
+    fireEvent.click(screen.getByTestId('submit-question-form'));
+    await waitFor(() => expect(fetchAmrWalletSnapshot).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+    await waitFor(() => {
+      if (!resolveConversationBMessages) throw new Error('Expected conv-b message load to be pending');
+    });
+    await act(async () => {
+      resolveConversationBMessages?.([]);
+    });
+
+    await act(async () => {
+      resolveWallet({
+        status: 'available',
+        profile: 'prod',
+        user: null,
+        balanceUsd: '10.00',
+        updatedAt: null,
+        fetchedAt: '2026-07-02T00:00:00.000Z',
+        stale: false,
+        source: 'vela_api',
+      });
+    });
+
+    await waitFor(() => {
+      const raw = window.localStorage.getItem('od:chat-queued-sends:project-1:v1');
+      expect(raw).toBeTruthy();
+      const queued = JSON.parse(raw ?? '[]') as Array<{
+        conversationId?: string;
+        prompt?: string;
+      }>;
+      expect(queued).toEqual([
+        expect.objectContaining({
+          conversationId: 'conv-a',
+          prompt: 'Audience: Designers',
+        }),
+      ]);
+    });
+    await waitFor(() => expect(questionFormSubmitOutcomes).toEqual([true]));
+    expect(streamViaDaemon).not.toHaveBeenCalled();
+  });
+
   it('does not create duplicate empty conversations while a fresh conversation is loading', async () => {
     renderProjectView();
 
@@ -899,6 +1812,168 @@ describe('ProjectView conversation run isolation', () => {
     fireEvent.click(screen.getByTestId('new-conversation'));
 
     expect(createConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create a conversation for a read-only member of a shared project', async () => {
+    const teamContext = teamWorkspaceContext('workspace-team', 'member-team');
+    workspaceScopeMocks.ambientContext = teamContext;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: teamContext.workspaceId,
+        visibility: 'team',
+        context: teamContext,
+      },
+    };
+    listConversations.mockResolvedValue([]);
+    projectCollabMocks.enabled = true;
+    projectCollabMocks.syncState = 'synced';
+    projectCollabMocks.viewerOnly = true;
+    projectCollabMocks.isOwner = false;
+    projectCollabMocks.writerAuthority = 'denied';
+
+    renderProjectView(config, { ...project, workspaceId: teamContext.workspaceId });
+
+    await waitFor(() => expect(listConversations).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('chat-pane-loading')).toBeNull();
+    expect(screen.getByTestId('active-conversation').textContent).toBe('');
+  });
+
+  it('seeds an empty explicitly Personal project without Team ownership status', async () => {
+    listConversations.mockResolvedValue([]);
+    projectCollabMocks.writerAuthority = 'pending';
+
+    renderProjectView();
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalledTimes(1));
+    expect(createConversation).toHaveBeenCalledWith(
+      project.id,
+      undefined,
+      expect.objectContaining({
+        workspaceContext: workspaceScopeMocks.personalContext(),
+      }),
+    );
+  });
+
+  it('seeds an empty Team project after positive writer authority settles', async () => {
+    const teamContext = teamWorkspaceContext('workspace-team', 'owner-member');
+    workspaceScopeMocks.ambientContext = teamContext;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: teamContext.workspaceId,
+        visibility: 'team',
+        context: teamContext,
+      },
+    };
+    listConversations.mockResolvedValue([]);
+    projectCollabMocks.enabled = true;
+    projectCollabMocks.syncState = 'synced';
+    projectCollabMocks.viewerOnly = false;
+    projectCollabMocks.isOwner = true;
+    projectCollabMocks.writerAuthority = 'allowed';
+
+    renderProjectView(config, { ...project, workspaceId: teamContext.workspaceId });
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalledTimes(1));
+    expect(createConversation).toHaveBeenCalledWith(
+      project.id,
+      undefined,
+      expect.objectContaining({ workspaceContext: teamContext }),
+    );
+  });
+
+  it('does not seed during unknown ownership even when provisional viewerOnly is false', async () => {
+    const teamContext = teamWorkspaceContext('workspace-team', 'member-team');
+    workspaceScopeMocks.ambientContext = teamContext;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: teamContext.workspaceId,
+        visibility: 'team',
+        context: teamContext,
+      },
+    };
+    listConversations.mockResolvedValue([]);
+    projectCollabMocks.enabled = true;
+    projectCollabMocks.syncState = null;
+    projectCollabMocks.viewerOnly = false;
+    projectCollabMocks.isOwner = false;
+    projectCollabMocks.writerAuthority = 'pending';
+
+    const teamProject = { ...project, workspaceId: teamContext.workspaceId };
+    const view = renderProjectView(config, teamProject);
+
+    await waitFor(() => expect(listConversations).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(createConversation).not.toHaveBeenCalled();
+
+    projectCollabMocks.syncState = 'synced';
+    projectCollabMocks.viewerOnly = true;
+    projectCollabMocks.writerAuthority = 'denied';
+    view.rerender(projectViewElement(config, teamProject));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(screen.queryByText('Could not create a conversation for this project.')).toBeNull();
+  });
+
+  it('does not seed after explicit other-owner status revokes provisional writer authority', async () => {
+    const teamContext = teamWorkspaceContext('workspace-team', 'member-team');
+    workspaceScopeMocks.ambientContext = teamContext;
+    workspaceScopeMocks.projectScope = {
+      loading: false,
+      scope: {
+        kind: 'team',
+        projectId: project.id,
+        workspaceId: teamContext.workspaceId,
+        visibility: 'team',
+        context: teamContext,
+      },
+    };
+    let resolveConversations!: (value: Conversation[]) => void;
+    listConversations.mockImplementationOnce(
+      () => new Promise<Conversation[]>((resolve) => {
+        resolveConversations = resolve;
+      }),
+    );
+    projectCollabMocks.enabled = true;
+    projectCollabMocks.syncState = null;
+    projectCollabMocks.viewerOnly = false;
+    projectCollabMocks.isOwner = false;
+    projectCollabMocks.writerAuthority = 'allowed';
+    const teamProject = { ...project, workspaceId: teamContext.workspaceId };
+    const view = renderProjectView(config, teamProject);
+
+    await waitFor(() => expect(listConversations).toHaveBeenCalledTimes(1));
+    projectCollabMocks.syncState = 'synced';
+    projectCollabMocks.viewerOnly = true;
+    projectCollabMocks.writerAuthority = 'denied';
+    view.rerender(projectViewElement(config, teamProject));
+
+    await act(async () => {
+      resolveConversations([]);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(createConversation).not.toHaveBeenCalled();
   });
 
   it('blocks duplicate new conversations while creation is in flight', async () => {
@@ -941,6 +2016,48 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(playSound).toHaveBeenCalledWith('success-sound'));
     expect(showCompletionNotification).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: 'run failure',
+      terminalMessage: { ...succeededAssistant, runStatus: 'failed' as const },
+    },
+    {
+      label: 'delivery failure',
+      terminalMessage: {
+        ...succeededAssistant,
+        resultDeliveryState: 'delivery_failed' as const,
+      },
+    },
+  ])(
+    'keeps the foreground $label system notification silent while preserving its sound',
+    async ({ terminalMessage }) => {
+      vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+
+      renderProjectView({
+        ...config,
+        notifications: {
+          ...config.notifications!,
+          desktopEnabled: true,
+        },
+      });
+
+      await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+      await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
+
+      fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+      await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+      resolveConversationBMessages?.([]);
+      await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('idle'));
+
+      conversationAMessages = [terminalMessage];
+      fireEvent.click(screen.getByTestId('conversation-select-conv-a'));
+
+      await waitFor(() => expect(playSound).toHaveBeenCalledWith('failure-sound'));
+      expect(showCompletionNotification).not.toHaveBeenCalled();
+    },
+  );
 
   it('downgrades a reloaded terminal Design run whose file writes never landed', async () => {
     conversationAMessages = [
@@ -996,6 +2113,62 @@ describe('ProjectView conversation run isolation', () => {
     expect(screen.getByTestId('chat-error').textContent).toMatch(
       /finished without producing a deliverable project file/i,
     );
+    expect(reattachDaemonRun).not.toHaveBeenCalled();
+  });
+
+  it('trusts the daemon artifact count when browser file reconciliation misses delivered output', async () => {
+    conversationAMessages = [
+      {
+        ...succeededAssistant,
+        content: '',
+        sessionMode: 'design',
+        events: [
+          { kind: 'text', text: 'I finished the design.' },
+          {
+            kind: 'tool_use',
+            id: 'write-1',
+            name: 'Write',
+            input: { file_path: 'index.html', content: '<!doctype html>' },
+          },
+        ],
+        preTurnFileNames: [],
+        producedFiles: undefined,
+        traceObjectFiles: undefined,
+      },
+    ];
+    fetchChatRunStatus.mockResolvedValue({
+      id: 'run-a',
+      status: 'succeeded',
+      createdAt: 1,
+      updatedAt: 2,
+      exitCode: 0,
+      signal: null,
+      artifactCount: 1,
+    });
+
+    renderProjectView();
+
+    await waitFor(() => {
+      const recoveredMessage = saveMessage.mock.calls
+        .map((call) => call[2] as ChatMessage)
+        .find(
+          (message) =>
+            message.id === succeededAssistant.id
+            && message.resultDeliveryState === 'delivered',
+        );
+      expect(recoveredMessage).toMatchObject({
+        runStatus: 'succeeded',
+        resultDeliveryState: 'delivered',
+        producedFiles: [],
+        traceObjectFiles: [],
+      });
+      expect(recoveredMessage?.events).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: 'ARTIFACT_NOT_FOUND' }),
+        ]),
+      );
+    });
+    expect(screen.getByTestId('chat-error').textContent).toBe('');
     expect(reattachDaemonRun).not.toHaveBeenCalled();
   });
 
@@ -1091,19 +2264,100 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
 
     fireEvent.click(screen.getByTestId('workspace-focus-mode'));
-    await waitFor(() =>
-      expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(true),
-    );
+    // Focus mode hides the collapsed chat visually only: the native `hidden`
+    // attribute would drop the first grid item and shift FileWorkspace into
+    // the handle track, so the slot keeps its box and is marked `aria-hidden`
+    // once the collapse settles (3284f36c0).
+    await waitFor(() => {
+      const chatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+      expect(chatSlot?.getAttribute('aria-hidden')).toBe('true');
+      expect(chatSlot?.classList.contains('split-chat-slot-hidden')).toBe(true);
+      expect(chatSlot?.hasAttribute('hidden')).toBe(false);
+    });
     fireEvent.click(screen.getByTestId('workspace-open-comments'));
     fireEvent.click(screen.getByTestId('workspace-send-comment'));
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
-    expect(screen.getByTestId('active-conversation').closest('.split-chat-slot')?.hasAttribute('hidden')).toBe(false);
+    const restoredChatSlot = screen.getByTestId('active-conversation').closest('.split-chat-slot');
+    expect(restoredChatSlot?.hasAttribute('aria-hidden')).toBe(false);
+    expect(restoredChatSlot?.classList.contains('split-chat-slot-hidden')).toBe(false);
+    expect(restoredChatSlot?.hasAttribute('hidden')).toBe(false);
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 'conv-b',
       projectId: 'project-1',
     }));
   });
+
+  it('refreshes the active conversation when a project comment event arrives', async () => {
+    renderProjectView();
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+    if (!resolveConversationBMessages) throw new Error('Expected conv-b message load to be pending');
+    resolveConversationBMessages([]);
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+
+    fetchPreviewComments.mockClear();
+    fetchPreviewComments.mockResolvedValue([previewComment]);
+    const handleProjectEvent = useProjectFileEvents.mock.calls.at(-1)?.[2] as
+      | ((event: { type: 'comment-changed'; projectId: string }) => void)
+      | undefined;
+    await act(async () => {
+      handleProjectEvent?.({ type: 'comment-changed', projectId: project.id });
+    });
+
+    await waitFor(() => {
+      expect(fetchPreviewComments).toHaveBeenCalledWith(
+        project.id,
+        'conv-b',
+        expect.anything(),
+      );
+    });
+    // The daemon GET is project-scoped for a Team share, so a comment whose
+    // local FK anchor is conv-a is intentionally accepted by the conv-b view.
+    expect(previewComment.conversationId).toBe('conv-a');
+  });
+
+  it('sends a project-scoped comment through the active chat when its local anchor belongs to another conversation', async () => {
+    renderProjectView();
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    fireEvent.click(screen.getByTestId('conversation-select-conv-b'));
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-b'));
+    if (!resolveConversationBMessages) throw new Error('Expected conv-b message load to be pending');
+    resolveConversationBMessages([]);
+    await waitFor(() => expect(screen.getByTestId('send-message')).toHaveProperty('disabled', false));
+
+    fetchPreviewComments.mockClear();
+    fetchPreviewComments.mockResolvedValue([previewComment]);
+    const handleProjectEvent = useProjectFileEvents.mock.calls.at(-1)?.[2] as
+      | ((event: { type: 'comment-changed'; projectId: string }) => void)
+      | undefined;
+    await act(async () => {
+      handleProjectEvent?.({ type: 'comment-changed', projectId: project.id });
+    });
+    await waitFor(() => expect(fetchPreviewComments).toHaveBeenCalledWith(
+      project.id,
+      'conv-b',
+      expect.anything(),
+    ));
+
+    fireEvent.click(screen.getByTestId('attach-first-comment'));
+    await waitFor(() => expect(screen.getByTestId('attached-comment-count').textContent).toBe('1'));
+    fireEvent.click(screen.getByTestId('send-message'));
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: project.id,
+      conversationId: 'conv-b',
+      commentAttachments: [expect.objectContaining({
+        id: previewComment.id,
+        comment: previewComment.note,
+      })],
+    })));
+    expect(previewComment.conversationId).toBe('conv-a');
+  });
+
   it('detaches saved comment attachments after queueing them for a busy conversation', async () => {
     fetchPreviewComments.mockResolvedValue([previewComment]);
 
@@ -1123,6 +2377,48 @@ describe('ProjectView conversation run isolation', () => {
 
     expect(streamViaDaemon).not.toHaveBeenCalled();
     expect(screen.getByTestId('attached-comment-count').textContent).toBe('0');
+  });
+
+  it('queues a logical submission only once when its stable request id is retried', async () => {
+    renderProjectView();
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
+
+    fireEvent.click(screen.getByTestId('send-message-stable-request'));
+    fireEvent.click(screen.getByTestId('send-message-stable-request'));
+
+    await waitFor(() => expect(screen.getByTestId('send-queued-0')).toBeTruthy());
+    expect(screen.queryByTestId('send-queued-1')).toBeNull();
+  });
+
+  it('reuses a queued submission request id when the daemon run starts', async () => {
+    let finishReattach: (() => void) | null = null;
+    let reattachHandlers: { onDone: () => void } | null = null;
+    reattachDaemonRun.mockImplementation(async (input: unknown) => {
+      reattachHandlers = (input as { handlers: { onDone: () => void } }).handlers;
+      return new Promise<void>((resolve) => {
+        finishReattach = resolve;
+      });
+    });
+
+    renderProjectView();
+
+    await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
+    await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
+
+    fireEvent.click(screen.getByTestId('send-message-stable-request'));
+    await waitFor(() => expect(screen.getByTestId('send-queued-0')).toBeTruthy());
+
+    await act(async () => {
+      reattachHandlers?.onDone();
+      finishReattach?.();
+    });
+
+    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
+    expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
+      clientRequestId: 'submission-1',
+    }));
   });
 
   it('keeps newer attached comments when a queued send flushes older comment attachments', async () => {
@@ -1272,6 +2568,7 @@ describe('ProjectView conversation run isolation', () => {
         'conv-a',
         previewComment.id,
         'applying',
+        workspaceScopeMocks.personalContext(),
       ),
     );
     patchPreviewCommentStatus.mockClear();
@@ -1286,11 +2583,15 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(screen.getByTestId('streaming-state').textContent).toBe('streaming'));
     expect(screen.getByTestId('workspace-streaming-state').textContent).toBe('streaming');
     expect(screen.getByTestId('conversation-latest-runs').textContent).toContain('conv-a:running');
+    // The workspace-context argument matters MOST on a negative assertion: a
+    // four-argument matcher can never match the real five-argument call, so
+    // omitting it would make this pass no matter what the code did.
     expect(patchPreviewCommentStatus).not.toHaveBeenCalledWith(
       'project-1',
       'conv-a',
       previewComment.id,
       'needs_review',
+      null,
     );
     expect(fetchProjectFiles).not.toHaveBeenCalled();
     expect(streamViaDaemon).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1519,6 +2820,7 @@ describe('ProjectView conversation run isolation', () => {
         expect.anything(),
         previewComment.id,
         'applying',
+        workspaceScopeMocks.personalContext(),
       ),
     );
     await waitFor(() => expect(screen.getByTestId('send-queued-0')).toBeTruthy());
@@ -1532,11 +2834,13 @@ describe('ProjectView conversation run isolation', () => {
     fireEvent.click(screen.getByTestId('send-queued-0'));
     await waitFor(() => expect(streamViaDaemon).toHaveBeenCalled());
 
+    // Arity matters on the negative assertion — see the note above.
     expect(patchPreviewCommentStatus).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       previewComment.id,
       'open',
+      null,
     );
   });
 
@@ -1628,6 +2932,28 @@ describe('ProjectView conversation run isolation', () => {
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
     await waitFor(() => expect(screen.getByTestId('send-queued-0').textContent).toBe('hello from b'));
+  });
+
+  it('restores only one queued send for each stable request id', async () => {
+    reattachDaemonRun.mockImplementation(async () => new Promise<void>(() => {}));
+    const duplicateQueuedSend = {
+      id: 'submission-1',
+      conversationId: 'conv-a',
+      prompt: 'hello from stable request',
+      attachments: [],
+      commentAttachments: [],
+      meta: { clientRequestId: 'submission-1' },
+      createdAt: 1,
+    };
+    window.localStorage.setItem(
+      'od:chat-queued-sends:project-1:v1',
+      JSON.stringify([duplicateQueuedSend, duplicateQueuedSend]),
+    );
+
+    renderProjectView();
+
+    await waitFor(() => expect(screen.getByTestId('send-queued-0')).toBeTruthy());
+    expect(screen.queryByTestId('send-queued-1')).toBeNull();
   });
 
   it('surfaces conversation message load errors and keeps sends disabled until messages load', async () => {
@@ -1723,6 +3049,10 @@ describe('ProjectView conversation run isolation', () => {
         promptNamedProject.id,
         emptyConversation.id,
         { title: 'Hello From B' },
+        expect.objectContaining({
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
+        }),
       ),
     );
     await waitFor(() =>
@@ -1731,6 +3061,10 @@ describe('ProjectView conversation run isolation', () => {
         expect.objectContaining({
           name: 'Hello From B',
           metadata: expect.objectContaining({ nameSource: 'prompt' }),
+        }),
+        expect.objectContaining({
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
         }),
       ),
     );
@@ -1774,6 +3108,10 @@ describe('ProjectView conversation run isolation', () => {
         promptNamedProject.id,
         emptyConversation.id,
         { title: 'Agent Title' },
+        expect.objectContaining({
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
+        }),
       ),
     );
     await waitFor(() =>
@@ -1782,6 +3120,10 @@ describe('ProjectView conversation run isolation', () => {
         expect.objectContaining({
           name: 'Agent Title',
           metadata: expect.objectContaining({ nameSource: 'agent' }),
+        }),
+        expect.objectContaining({
+          workspaceId: 'workspace-personal',
+          workspaceMemberId: 'member-personal',
         }),
       ),
     );
@@ -1832,9 +3174,7 @@ describe('ProjectView conversation run isolation', () => {
       ...config,
       mode: 'api',
       apiProtocol: 'openai',
-      apiKey: '',
-      byokProfileId: 'byok-test-profile',
-      byokCredentialConfigured: true,
+      apiKey: 'byok-test-key',
       baseUrl: 'https://api.openai.com/v1',
       model: 'api-model',
     });
@@ -1847,7 +3187,12 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'byok-opencode',
-      byokProfileId: 'byok-test-profile',
+      byokProvider: expect.objectContaining({
+        protocol: 'openai',
+        apiKey: 'byok-test-key',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'api-model',
+      }),
       model: 'api-model',
     }));
     await waitFor(() => expect(playSound).toHaveBeenCalledWith('success-sound'));
@@ -1891,8 +3236,6 @@ describe('ProjectView conversation run isolation', () => {
           agentId,
           apiProtocol: 'openai',
           apiKey,
-          byokProfileId: undefined,
-          byokCredentialConfigured: false,
           baseUrl: 'https://api.openai.com/v1',
           model,
         },
@@ -1921,6 +3264,20 @@ describe('ProjectView conversation run isolation', () => {
         },
         undefined,
       );
+      expect(analyticsTrackMock).toHaveBeenCalledWith(
+        'surface_view',
+        expect.objectContaining({
+          page_name: 'chat_panel',
+          area: 'chat_composer',
+          element: 'run_start_blocked',
+          task_execution_id: expect.any(String),
+          recovery_action_instance_id: expect.stringMatching(/^blocked:/),
+          block_reason: reason,
+          agent_provider_id: 'openai',
+          model_id: model.trim() || 'default',
+        }),
+        undefined,
+      );
       expect(streamViaDaemon).not.toHaveBeenCalled();
       expect(saveMessage).not.toHaveBeenCalled();
     },
@@ -1947,7 +3304,12 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'byok-opencode',
-      byokProfileId: 'byok-test-profile',
+      byokProvider: expect.objectContaining({
+        protocol: 'ollama',
+        baseUrl: 'http://localhost:11434',
+        model: 'llama3.2',
+        requiresApiKey: false,
+      }),
       model: 'llama3.2',
     }));
   });
@@ -1974,7 +3336,12 @@ describe('ProjectView conversation run isolation', () => {
     await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(1));
     expect(streamViaDaemon).toHaveBeenCalledWith(expect.objectContaining({
       agentId: 'byok-opencode',
-      byokProfileId: 'byok-test-profile',
+      byokProvider: expect.objectContaining({
+        protocol: 'openai',
+        baseUrl: 'http://127.0.0.1:8000/v1',
+        model: 'model',
+        requiresApiKey: false,
+      }),
       model: 'model',
     }));
   });
@@ -2050,13 +3417,13 @@ describe('ProjectView conversation run isolation', () => {
         if (streamViaDaemon.mock.calls.length > 1) return;
         options.onRunCreated?.('run-amr-balance');
         const error = new Error(
-          'AMR Cloud reported insufficient balance for this model. Recharge your AMR wallet at https://open-design.ai/amr/wallet, then retry this run.',
+          'AMR Cloud reported insufficient balance for this model. Top up your AMR balance at https://open-design.ai/amr/dashboard, then retry this run.',
         ) as Error & { code: string; details: unknown };
         error.code = 'AMR_INSUFFICIENT_BALANCE';
         error.details = {
           kind: 'amr_account',
           action: 'recharge',
-          actionUrl: 'https://open-design.ai/amr/wallet',
+          actionUrl: 'https://open-design.ai/amr/dashboard',
         };
         options.handlers.onError(error);
       },
@@ -2183,6 +3550,7 @@ describe('ProjectView conversation run isolation', () => {
     const onModeChange = vi.fn();
     const onAgentChange = vi.fn();
     const onOpenAmrSettings = vi.fn();
+    const onArmAmrAuthRetryContinuation = vi.fn();
     streamViaDaemon.mockImplementation(
       async (options: {
         onRunCreated?: (runId: string) => void;
@@ -2216,7 +3584,12 @@ describe('ProjectView conversation run isolation', () => {
           models: [{ id: 'glm-5', label: 'GLM 5' }],
         },
       ],
-      { onModeChange, onAgentChange, onOpenAmrSettings },
+      {
+        onModeChange,
+        onAgentChange,
+        onOpenAmrSettings,
+        onArmAmrAuthRetryContinuation,
+      },
     );
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
@@ -2232,13 +3605,27 @@ describe('ProjectView conversation run isolation', () => {
     expect(onModeChange).toHaveBeenCalledWith('daemon');
     expect(onAgentChange).toHaveBeenCalledWith('amr');
     expect(onOpenAmrSettings).toHaveBeenCalledTimes(1);
+    expect(onArmAmrAuthRetryContinuation).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: project.id,
+      conversationId: 'conv-a',
+      assistantId: expect.any(String),
+      originMountId: expect.any(String),
+      workspaceIdentityKey: expect.any(String),
+    }));
+    expect(onArmAmrAuthRetryContinuation.mock.invocationCallOrder[0]).toBeLessThan(
+      onModeChange.mock.invocationCallOrder[0]!,
+    );
+    expect(onArmAmrAuthRetryContinuation.mock.invocationCallOrder[0]).toBeLessThan(
+      onOpenAmrSettings.mock.invocationCallOrder[0]!,
+    );
     expect(screen.getByTestId('streaming-state').textContent).toBe('idle');
   });
 
-  it('auto-retries after AMR authorization succeeds', async () => {
+  it('leaves retry ownership with the App continuation while Settings is open', async () => {
     conversationAMessages = [];
     fetchChatRunStatus.mockResolvedValue(null);
     fetchVelaLoginStatus.mockResolvedValue({ loggedIn: true });
+    const onArmAmrAuthRetryContinuation = vi.fn();
     streamViaDaemon.mockImplementation(
       async (options: {
         onRunCreated?: (runId: string) => void;
@@ -2273,7 +3660,10 @@ describe('ProjectView conversation run isolation', () => {
           models: [{ id: 'glm-5', label: 'GLM 5' }],
         },
       ],
-      { onOpenAmrSettings: vi.fn() },
+      {
+        onOpenAmrSettings: vi.fn(),
+        onArmAmrAuthRetryContinuation,
+      },
     );
 
     await waitFor(() => expect(screen.getByTestId('active-conversation').textContent).toBe('conv-a'));
@@ -2286,8 +3676,9 @@ describe('ProjectView conversation run isolation', () => {
 
     fireEvent.click(screen.getByTestId('workspace-authorize'));
 
-    await waitFor(() => expect(fetchVelaLoginStatus).toHaveBeenCalled());
-    await waitFor(() => expect(streamViaDaemon).toHaveBeenCalledTimes(2));
+    expect(onArmAmrAuthRetryContinuation).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(streamViaDaemon).toHaveBeenCalledTimes(1);
   });
 
   it('routes Chat retry and terminal launch recovery for antigravity auth failures', async () => {
@@ -2452,9 +3843,32 @@ function renderProjectView(
     onAgentChange?: (agentId: string) => void;
     onOpenSettings?: (section?: SettingsSection) => void;
     onOpenAmrSettings?: () => void;
+    onArmAmrAuthRetryContinuation?: (
+      continuation: Omit<AmrAuthRetryContinuation, 'accountIdAtArm' | 'createdAtMs'>,
+    ) => void;
   } = {},
 ) {
-  return render(
+  return render(projectViewElement(renderConfig, renderProject, renderAgents, handlers));
+}
+
+function projectViewElement(
+  renderConfig = config,
+  renderProject: Project = project,
+  renderAgents: AgentInfo[] = [
+    { id: 'agent-1', name: 'OpenCode', bin: 'opencode', available: true, models: [] },
+    { id: 'byok-opencode', name: 'BYOK OpenCode', bin: 'opencode', available: true, models: [] },
+  ],
+  handlers: {
+    onModeChange?: (mode: 'daemon' | 'api') => void;
+    onAgentChange?: (agentId: string) => void;
+    onOpenSettings?: (section?: SettingsSection) => void;
+    onOpenAmrSettings?: () => void;
+    onArmAmrAuthRetryContinuation?: (
+      continuation: Omit<AmrAuthRetryContinuation, 'accountIdAtArm' | 'createdAtMs'>,
+    ) => void;
+  } = {},
+) {
+  return (
     <ProjectView
       project={renderProject}
       routeFileName={null}
@@ -2470,11 +3884,12 @@ function renderProjectView(
       onRefreshAgents={() => {}}
       onOpenSettings={handlers.onOpenSettings ?? (() => {})}
       onOpenAmrSettings={handlers.onOpenAmrSettings}
+      onArmAmrAuthRetryContinuation={handlers.onArmAmrAuthRetryContinuation}
       onBack={() => {}}
       onClearPendingPrompt={() => {}}
       onTouchProject={() => {}}
       onProjectChange={() => {}}
       onProjectsRefresh={() => {}}
-    />,
+    />
   );
 }

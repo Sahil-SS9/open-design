@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 export const SITE = 'https://open-design.ai';
 export const GSC_SITE_URL = 'sc-domain:open-design.ai';
 export const SITEMAP_URL = `${SITE}/sitemap-index.xml`;
-export const SITEMAP_CHILD_URL = `${SITE}/sitemap-0.xml`;
+export const SITEMAP_BLOG_CHILD_PREFIX = `${SITE}/sitemap-blog-`;
 export const INDEXNOW_KEY = '96b0928121e24fd7b4ef85ae0f8bf1d8';
 export const INDEXNOW_KEY_LOCATION = `${SITE}/${INDEXNOW_KEY}.txt`;
 
@@ -127,6 +127,13 @@ export interface BlogIndexingState {
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Extract absolute `<loc>` values from a sitemap index or URL-set document. */
+export function extractSitemapLocations(xml: string): string[] {
+  return Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((match) =>
+    match[1]!.trim(),
+  );
 }
 
 /**
@@ -465,6 +472,30 @@ export function isPostFile(file: string): boolean {
 /** Strips the blog prefix and `.md` to derive the post slug. */
 export function fileToSlug(file: string): string {
   return path.basename(file).replace(/\.md$/, '');
+}
+
+/**
+ * Derives the post slug from a canonical blog URL, or undefined for any
+ * other URL shape. Inverse of `blogSlugToUrl`.
+ */
+export function urlToBlogSlug(url: string): string | undefined {
+  const m = url.match(new RegExp(`^${SITE}/blog/([^/]+)/$`));
+  return m?.[1];
+}
+
+/**
+ * True when the post's source frontmatter opts the whole cluster out of the
+ * search index with a top-level `noindex: true` (see the `noindex` docblock
+ * in `apps/landing-page/app/content.config.ts`). Such posts are deliberately
+ * noindexed and dropped from the sitemap, so the indexing pipeline must skip
+ * them instead of treating them as readiness failures. Same regex style as
+ * the sitemap filter in `astro.config.ts`; the anchored `noindex:` does not
+ * match the indented i18n keys or `noindexLocaleVariants:`.
+ */
+export function isNoindexPost(slug: string): boolean {
+  const file = path.join(BLOG_DIR, `${slug}.md`);
+  if (!existsSync(file)) return false;
+  return /^noindex:\s*true\b/m.test(readFileSync(file, 'utf8'));
 }
 
 /* -------------------------- IO utils ------------------------- */

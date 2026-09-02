@@ -1,28 +1,22 @@
 import { Button } from '@open-design/components';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useI18n, type Locale } from '../i18n';
 import {
   clearAnonymousState,
+  findGoPlanSunsetMessage,
   isAmrLoggedIn,
   markAccountMessageRead,
-  markAllAccountMessagesRead,
   pullMessageCenter,
   readAnonymousMessages,
   readAnonymousReadIds,
-  type MessageCenterFilter,
   type MessageCenterMessage,
   writeAnonymousState,
 } from '../message-center-client';
+import { GoPlanSunsetDialog } from './GoPlanSunsetDialog';
 import { Icon } from './Icon';
 import styles from './MessageCenter.module.css';
-
-const FILTERS: Array<{ id: MessageCenterFilter; label: 'messageCenter.filterAll' | 'messageCenter.filterUnread' | 'messageCenter.filterRead' }> = [
-  { id: 'all', label: 'messageCenter.filterAll' },
-  { id: 'unread', label: 'messageCenter.filterUnread' },
-  { id: 'read', label: 'messageCenter.filterRead' },
-];
 
 function unreadBadgeLabel(count: number): string {
   return count > 9 ? '9+' : String(count);
@@ -36,26 +30,67 @@ function formatPublishedDate(value: string, locale: Locale): string | null {
 
 interface Props {
   onOpenNotificationSettings?: () => void;
+  /** Hide the built-in bell trigger — the host renders its own entry point
+   *  (e.g. an account-menu row) and drives the panel via `open`/`onOpenChange`. */
+  hideTrigger?: boolean;
+  /** The still-mounted host control focus returns to when the panel closes.
+   *  Required alongside `hideTrigger`: the built-in bell is what focus would
+   *  otherwise return to, and a host that hides it owns that duty instead. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Controlled open state; pair with `onOpenChange` when `hideTrigger` is set. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Streams the unread count so hosts can render their own badge (e.g. the
+   *  rail avatar's red dot). */
+  onUnreadCountChange?: (count: number) => void;
+  /** Whether the Home shell currently grants the targeted announcement its
+   *  modal slot. Detection still runs while false, so the notice can wait
+   *  behind higher-priority business dialogs or a non-Home route. */
+  priorityAnnouncementActive?: boolean;
+  onPriorityAnnouncementPendingChange?: (pending: boolean) => void;
+  priorityAnnouncementCurrentPlanId?: string | null;
+  priorityAnnouncementMetricsConsent?: boolean;
 }
 
 type SyncState = 'loading' | 'ready' | 'error';
 
-export function MessageCenter({ onOpenNotificationSettings }: Props) {
+export function MessageCenter({
+  onOpenNotificationSettings,
+  hideTrigger = false,
+  returnFocusRef,
+  open: controlledOpen,
+  onOpenChange,
+  onUnreadCountChange,
+  priorityAnnouncementActive = false,
+  onPriorityAnnouncementPendingChange,
+  priorityAnnouncementCurrentPlanId,
+  priorityAnnouncementMetricsConsent = false,
+}: Props) {
   const { locale, t } = useI18n();
   const titleId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<MessageCenterFilter>('all');
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = controlledOpen ?? openInternal;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setOpenInternal(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange],
+  );
   const [messages, setMessages] = useState<MessageCenterMessage[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [loggedIn, setLoggedIn] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>('loading');
+  const [priorityMessage, setPriorityMessage] = useState<MessageCenterMessage | null>(null);
   const loggedInRef = useRef(false);
   const messagesRef = useRef<MessageCenterMessage[]>([]);
   const readIdsRef = useRef<Set<string>>(new Set());
   const pendingReadIdsRef = useRef<Set<string>>(new Set());
   const syncRequestIdRef = useRef(0);
+  const priorityPendingCallbackRef = useRef(onPriorityAnnouncementPendingChange);
+  priorityPendingCallbackRef.current = onPriorityAnnouncementPendingChange;
 
   const commitState = useCallback(
     (nextMessages: MessageCenterMessage[], nextReadIds: Set<string>, options?: { persistAnonymous?: boolean }) => {
@@ -79,6 +114,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     if (wasAccount && !account) {
       readIdsRef.current = new Set();
       pendingReadIdsRef.current = new Set();
+      setPriorityMessage(null);
     }
     const pulled = await pullMessageCenter({ locale, loggedIn: account });
     if (requestId !== syncRequestIdRef.current) return;
@@ -99,6 +135,7 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     }));
     if (account) clearAnonymousState(window.localStorage);
     commitState(merged, overlayReadIds, { persistAnonymous: !account });
+    setPriorityMessage(account ? findGoPlanSunsetMessage(merged) : null);
     setSyncState('ready');
   }, [commitState, locale]);
 
@@ -142,14 +179,30 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
   }, [open, retrySync]);
 
   const unreadCount = messages.filter((message) => !message.readAt).length;
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => filter === 'all' || (filter === 'read' ? Boolean(message.readAt) : !message.readAt)),
-    [filter, messages],
-  );
+
+  useEffect(() => {
+    onUnreadCountChange?.(unreadCount);
+  }, [unreadCount, onUnreadCountChange]);
+
+  useEffect(() => {
+    onPriorityAnnouncementPendingChange?.(priorityMessage != null);
+  }, [onPriorityAnnouncementPendingChange, priorityMessage]);
+
+  useEffect(() => () => {
+    priorityPendingCallbackRef.current?.(false);
+  }, []);
+
+  /** The control keyboard focus must land on after the panel closes. Opening
+   *  focuses the portaled dialog, so closing always unmounts the focused node —
+   *  without a target here focus falls to the document and the user loses their
+   *  place in the rail. The built-in bell owns it by default; under
+   *  `hideTrigger` that button does not exist and the host's opener does. */
+  const returnFocusTarget = (): HTMLElement | null =>
+    triggerRef.current ?? returnFocusRef?.current ?? null;
 
   const closePanel = () => {
     setOpen(false);
-    triggerRef.current?.focus();
+    returnFocusTarget()?.focus();
   };
 
   useEffect(() => {
@@ -170,10 +223,26 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     };
   }, [open]);
 
-  const markRead = async (messageId: string) => {
+  useEffect(() => {
+    if (priorityAnnouncementActive && priorityMessage != null && open) {
+      setOpen(false);
+    }
+  }, [open, priorityAnnouncementActive, priorityMessage, setOpen]);
+
+  const markRead = async (messageId: string, options?: { requireAccount?: boolean }) => {
     const message = messagesRef.current.find((item) => item.id === messageId);
-    if (!message || message.readAt) return;
+    if (!message) {
+      if (options?.requireAccount) throw new Error('Announcement message is no longer available');
+      return;
+    }
+    if (message.readAt) {
+      if (priorityMessage?.id === messageId) setPriorityMessage(null);
+      return;
+    }
     const account = await resolveLoggedInForWrite();
+    if (options?.requireAccount && !account) {
+      throw new Error('A signed-in account is required to acknowledge this announcement');
+    }
     const readAt = new Date().toISOString();
     if (account) await markAccountMessageRead(messageId);
     const nextIds = new Set(readIdsRef.current).add(messageId);
@@ -184,32 +253,17 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
     }
     invalidateSyncResponses();
     commitState(nextMessages, nextIds, { persistAnonymous: !account });
-  };
-
-  const markAllRead = async () => {
-    const account = await resolveLoggedInForWrite();
-    if (account) await markAllAccountMessagesRead();
-    const readAt = new Date().toISOString();
-    const nextIds = new Set(messagesRef.current.map((message) => message.id));
-    const nextMessages = messagesRef.current.map((message) => ({ ...message, readAt: message.readAt ?? readAt }));
-    if (account) {
-      pendingReadIdsRef.current = new Set(nextIds);
-      clearAnonymousState(window.localStorage);
-    }
-    invalidateSyncResponses();
-    commitState(nextMessages, nextIds, { persistAnonymous: !account });
+    if (priorityMessage?.id === messageId) setPriorityMessage(null);
   };
 
   const openLabel = unreadCount > 0 ? `${t('messageCenter.openAria')} (${t('messageCenter.unreadCount', { count: unreadCount })})` : t('messageCenter.openAria');
-  const emptyTitle = filter === 'unread' ? t('messageCenter.emptyUnreadTitle') : filter === 'read' ? t('messageCenter.emptyReadTitle') : t('messageCenter.emptyAllTitle');
 
   return <div className={styles.root}>
-    <button ref={triggerRef} type="button" className={`settings-icon-btn od-tooltip ${styles.trigger}`} onClick={() => setOpen((value) => !value)} title={t('messageCenter.openAria')} data-tooltip={t('messageCenter.openAria')} data-tooltip-placement="bottom" aria-label={openLabel} aria-haspopup="dialog" aria-expanded={open} data-testid="message-center-trigger">
+    {hideTrigger ? null : <button ref={triggerRef} type="button" className={`settings-icon-btn od-tooltip ${styles.trigger}`} onClick={() => setOpen(!open)} title={t('messageCenter.openAria')} data-tooltip={t('messageCenter.openAria')} data-tooltip-placement="bottom" aria-label={openLabel} aria-haspopup="dialog" aria-expanded={open} data-testid="message-center-trigger">
       <Icon name="bell" size={17} />{unreadCount > 0 ? <span className={styles.badge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}
-    </button>
+    </button>}
     {open ? createPortal(<div className={styles.backdrop} data-testid="message-center-backdrop"><aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} data-testid="message-center-dialog">
-      <header className={styles.header}><div className={styles.headerCopy}><h2 id={titleId}>{t('messageCenter.title')}</h2><p>{t('messageCenter.subtitle')}</p></div><button type="button" className={styles.close} onClick={closePanel} aria-label={t('messageCenter.close')}><Icon name="close" size={18} strokeWidth={2}/></button></header>
-      <div className={styles.controls}><div className={styles.filters} role="group" aria-label={t('messageCenter.title')}>{FILTERS.map((item) => <button key={item.id} type="button" className={`${styles.filter}${filter === item.id ? ` ${styles.filterActive}` : ''}`} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{t(item.label)}{item.id === 'unread' && unreadCount > 0 ? <span className={styles.filterBadge} aria-hidden>{unreadBadgeLabel(unreadCount)}</span> : null}</button>)}</div><button type="button" className={styles.markAll} onClick={() => void markAllRead().catch(() => setSyncState('error'))} disabled={unreadCount === 0}>{t('messageCenter.markAllRead')}</button></div>
+      <header className={styles.header}><div className={styles.headerCopy}><h2 id={titleId}>{t('messageCenter.title')}</h2><p>{t('messageCenter.subtitle')}</p></div><Button size="icon" className={styles.close} onClick={closePanel} aria-label={t('messageCenter.close')}><Icon name="close" size={18} strokeWidth={2}/></Button></header>
       <div className={styles.list} aria-live="polite">
         {syncState === 'error' && messages.length > 0 ? (
           <div className={styles.syncStatus} role="status">
@@ -234,10 +288,20 @@ export function MessageCenter({ onOpenNotificationSettings }: Props) {
               </button>
             </div>
           </div>
-        ) : visibleMessages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{emptyTitle}</strong><p>{t('messageCenter.emptyBody')}</p></div> : visibleMessages.map((message) => <MessageItem key={message.id} locale={locale} message={message} onRead={markRead} onError={() => setSyncState('error')}/>)}
+        ) : messages.length === 0 ? <div className={styles.empty}><Icon name="bell" size={20}/><strong>{t('messageCenter.emptyAllTitle')}</strong><p>{t('messageCenter.emptyBody')}</p></div> : messages.map((message) => <MessageItem key={message.id} locale={locale} message={message} onRead={markRead} onError={() => setSyncState('error')}/>)}
       </div>
       <footer className={styles.footer}><p>{t('messageCenter.desktopSettingsHint')}</p>{onOpenNotificationSettings ? <Button variant="ghost" onClick={() => { closePanel(); onOpenNotificationSettings(); }}>{t('messageCenter.desktopSettings')}</Button> : null}</footer>
     </aside></div>, document.body) : null}
+    {priorityMessage != null ? (
+      <GoPlanSunsetDialog
+        active={priorityAnnouncementActive}
+        currentPlanId={priorityAnnouncementCurrentPlanId ?? 'unknown'}
+        metricsConsent={priorityAnnouncementMetricsConsent}
+        onDismiss={async () => {
+          await markRead(priorityMessage.id, { requireAccount: true });
+        }}
+      />
+    ) : null}
   </div>;
 }
 

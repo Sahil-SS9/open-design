@@ -6,6 +6,17 @@
 import type { JsonRpcId, RpcWritable } from './types.js';
 import { asObject } from './json.js';
 
+/** Safe numeric facts derived from the exact serialized request frame. */
+export interface SerializedRpcFrameObservation {
+  method: string;
+  frameBytes: number;
+}
+
+/** Best-effort observer invoked after the serialized request is written. */
+export type SerializedRpcFrameObserver = (
+  observation: SerializedRpcFrameObservation,
+) => void;
+
 /**
  * Writes a JSON-RPC 2.0 request frame to `writable` as a single newline-terminated
  * line. Used to send ACP method calls (e.g. `initialize`, `session/new`,
@@ -16,10 +27,23 @@ import { asObject } from './json.js';
  * @param method - The RPC method name.
  * @param params - The method parameter payload (any JSON-serialisable value).
  */
-export function sendRpc(writable: RpcWritable, id: JsonRpcId, method: string, params: unknown): void {
-  writable.write(
-    `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`,
-  );
+export function sendRpc(
+  writable: RpcWritable,
+  id: JsonRpcId,
+  method: string,
+  params: unknown,
+  observeSerializedFrame?: SerializedRpcFrameObserver,
+): void {
+  const frame = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
+  writable.write(frame);
+  try {
+    observeSerializedFrame?.({
+      method,
+      frameBytes: Buffer.byteLength(frame, 'utf8'),
+    });
+  } catch {
+    // Observability must never change request delivery or retry policy.
+  }
 }
 /**
  * Writes a JSON-RPC 2.0 result response frame to `writable`. Used to reply to
@@ -88,8 +112,29 @@ export function rpcErrorRetryable(data: unknown): boolean | undefined {
   return typeof details?.retryable === 'boolean' ? details.retryable : undefined;
 }
 /**
+ * Fallback retryability inference from the error message/details text, used when
+ * the runtime does not set an explicit `retryable` field. `request_too_large`
+ * (the prompt must shrink) is non-retryable; upstream transport blips
+ * (`stream idle timeout`, `overloaded`, gateway/service outages) are retryable.
+ * Returns `undefined` when nothing matches so callers keep their own default.
+ */
+export function inferRpcErrorRetryable(message: string, data: unknown): boolean | undefined {
+  const details = asObject(data);
+  const text = [
+    message,
+    details ? JSON.stringify(details) : '',
+  ].join('\n');
+  if (/\b(request_too_large|request body exceeds configured limit)\b/i.test(text)) {
+    return false;
+  }
+  if (/\b(upstream_error|stream idle timeout|no data received within configured window|temporarily unavailable|overloaded|gateway timeout|service unavailable)\b/i.test(text)) {
+    return true;
+  }
+  return undefined;
+}
+/**
  * Promotes an opencode `ROLE_MARKER_HALLUCINATION` error embedded in an ACP
- * JSON-RPC `error.data` payload into a canonical Open Design error object.
+ * JSON-RPC `error.data` payload into a canonical OpenDesign error object.
  * Returns `null` when the data payload does not match the expected shape.
  * Exists so callers can surface a vendor-specific failure with a structured
  * error code rather than a bare generic message.
