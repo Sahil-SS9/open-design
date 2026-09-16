@@ -1,4 +1,4 @@
-# OD Next Prototype Task Profile v2.3.0
+# OD Next Prototype Task Profile v2.3.1
 
 > Rollout: active
 
@@ -234,6 +234,10 @@ Treat functional inline SVGs as one component contract before writing markup:
   arrows, status marks, and control icons. Content SVGs — charts, plans,
   diagrams, logos, maps, and illustrations — keep their own explicit geometry;
   never size them through `.od-icon` or a global `svg` rule.
+- Classify by the role the SVG plays on the page, not by its canvas size and
+  not by whether it carries a `viewBox`. A logo stays a content SVG even
+  inside a button or a nav bar; a deliberately large UI glyph stays functional
+  and takes its size from `--od-icon-size`.
 
 ### Design usable forms and feedback
 

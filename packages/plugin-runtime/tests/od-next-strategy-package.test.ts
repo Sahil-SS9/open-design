@@ -130,7 +130,7 @@ describe('bundled OD Next Strategy V2 package', () => {
     const ruleCard = readFileSync(`${pluginRoot}/assets/task-profiles/prototype.md`, 'utf8');
     const primitives = readFileSync(`${pluginRoot}/assets/task-profiles/prototype/layout.css`, 'utf8');
 
-    expect(prototype?.version).toBe('2.3.0');
+    expect(prototype?.version).toBe('2.3.1');
     expect(prototype?.resources?.find((resource) => resource.path.endsWith('/layout.css'))?.version)
       .toBe('1.1.0');
     expect(ruleCard).toContain('### Bound functional icon geometry');
