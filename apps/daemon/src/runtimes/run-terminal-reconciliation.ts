@@ -6,11 +6,17 @@ import type Database from 'better-sqlite3';
 import {
   buildRunFinishedV4Aliases,
   type TrackingRunCancelOrigin,
+  type TrackingRunTerminalIntegrity,
   type TrackingRunTerminalTrigger,
   type RunTaskLineageProps,
 } from '@open-design/contracts/analytics';
 
 import { appendMessageStatusEvent } from '../db.js';
+import {
+  normalizeAnalyticsCaptureResult,
+  type AnalyticsCaptureResult,
+} from '../analytics.js';
+import type { IntentRecoveryRunState } from '../strategies/od-next/intent-resolution-recovery.js';
 import { reconcileStrategyTaskRunTerminal } from '../strategies/task-store.js';
 import { classifyRunFailure } from '../run-failure-classification.js';
 import { summarizeRunDiagnosticsForAnalytics } from '../run-diagnostics.js';
@@ -31,6 +37,15 @@ import {
   type RunTelemetryDeliveryStateV1,
 } from '../observability/delivery-state.js';
 import {
+  beginPosthogTerminalDelivery,
+  classifyMatureUnfinishedRun,
+  finalizePosthogTerminalDelivery,
+  markTerminalLifecycleReconciled,
+  terminalLifecycleForPosthogLocalQueue,
+  terminalLifecycleSnapshot,
+  type RunTerminalLifecycleV1,
+} from '../observability/run-terminal-lifecycle.js';
+import {
   normalizeTelemetryAppVersion,
   normalizeTelemetryAppVersionInfo,
   UNKNOWN_APP_VERSION,
@@ -39,17 +54,39 @@ import {
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 const RECONCILED_STATUS_MESSAGE = 'Run terminal state reconciled after daemon restart.';
-const STRONGER_TERMINAL_INTEGRITY = new Set([
+const PRESERVED_TERMINAL_INTEGRITY = new Set<TrackingRunTerminalIntegrity>([
+  'duplicate',
   'late',
+  'reconciled',
   'overwritten',
   'permanently_missing',
   'post_terminal_activity',
 ]);
 
-function reconciledTerminalIntegrity(value: unknown): string {
-  return typeof value === 'string' && STRONGER_TERMINAL_INTEGRITY.has(value)
-    ? value
+function recoveredTerminalIntegrity(value: unknown): TrackingRunTerminalIntegrity {
+  return typeof value === 'string'
+    && PRESERVED_TERMINAL_INTEGRITY.has(value as TrackingRunTerminalIntegrity)
+    ? value as TrackingRunTerminalIntegrity
     : 'reconciled';
+}
+
+function acknowledgeReadableTerminalPersistence(
+  lifecycle: RunTerminalLifecycleV1,
+): RunTerminalLifecycleV1 {
+  const acknowledged = {
+    ...lifecycle,
+    terminalPersistence: {
+      status: 'acknowledged' as const,
+      errorType: null,
+    },
+  };
+  return {
+    ...acknowledged,
+    unfinishedState: classifyMatureUnfinishedRun({
+      runStatus: 'terminal',
+      terminalLifecycle: acknowledged,
+    }),
+  };
 }
 
 interface AnalyticsRecovery {
@@ -59,7 +96,7 @@ interface AnalyticsRecovery {
   completedAt?: number;
 }
 
-interface DurableRunState extends RestartRecoverableDurableRunState {
+interface DurableRunState extends RestartRecoverableDurableRunState, IntentRecoveryRunState {
   schemaVersion: 1;
   id: string;
   projectId: string | null;
@@ -88,6 +125,11 @@ interface DurableRunState extends RestartRecoverableDurableRunState {
   analyticsRecovery?: AnalyticsRecovery;
   langfuseCompletedAt?: number;
   telemetryDelivery?: RunTelemetryDeliveryStateV1;
+  cumulativeRetryAttemptCount?: number;
+  retryAttemptCount?: number;
+  manualResumeAttemptCount?: number;
+  runtimeGenerationId?: string | null;
+  terminalLifecycle?: RunTerminalLifecycleV1;
 }
 
 interface AnalyticsLike {
@@ -97,7 +139,7 @@ interface AnalyticsLike {
     appVersion: string;
     properties: Record<string, unknown>;
     insertId: string;
-  }): void | Promise<void>;
+  }): unknown | Promise<unknown>;
 }
 
 interface ReconciliationOptions {
@@ -122,6 +164,11 @@ interface ReconciliationOptions {
     completion: Promise<unknown>;
   };
   runsLogDir: string;
+  recoverBeforeInterrupt?: (
+    state: DurableRunState,
+    states: ReadonlyMap<string, DurableRunState>,
+    now: number,
+  ) => Partial<DurableRunState> | null;
   finalizeTerminalLocally?: (run: DurableRunState, status: string, terminalAt: number) => void;
 }
 
@@ -165,13 +212,15 @@ function readState(filePath: string): DurableRunState | null {
   }
 }
 
-function writeState(filePath: string, state: DurableRunState): void {
+function writeState(filePath: string, state: DurableRunState): boolean {
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
     fs.writeFileSync(tempPath, `${JSON.stringify(state)}\n`, { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tempPath, filePath);
+    return true;
   } catch {
     try { fs.unlinkSync(tempPath); } catch { /* best-effort cleanup */ }
+    return false;
   }
 }
 
@@ -234,6 +283,7 @@ function reconcileMessages(
   db: Database.Database,
   statesByRunId: Map<string, DurableRunState>,
   now: number,
+  deferredRunIds: ReadonlySet<string>,
 ): number {
   let rows: Array<{ id: string; runId: string | null }> = [];
   try {
@@ -245,7 +295,10 @@ function reconcileMessages(
   } catch {
     return 0;
   }
+  let reconciled = 0;
   for (const row of rows) {
+    if (row.runId && deferredRunIds.has(row.runId)) continue;
+    reconciled += 1;
     const state = row.runId ? statesByRunId.get(row.runId) : undefined;
     const status = state && TERMINAL_STATUSES.has(state.status) ? state.status : 'failed';
     db.prepare(
@@ -264,7 +317,7 @@ function reconcileMessages(
         }
       : { label: status, detail: RECONCILED_STATUS_MESSAGE });
   }
-  return rows.length;
+  return reconciled;
 }
 
 /**
@@ -309,7 +362,7 @@ export async function reconcileDurableRunTerminals(
     entries = [];
   }
 
-  const states = entries
+  let states = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({
       filePath: path.join(options.runsLogDir, entry.name, 'state.json'),
@@ -318,6 +371,7 @@ export async function reconcileDurableRunTerminals(
     .filter((entry): entry is { filePath: string; state: DurableRunState } => entry.state !== null);
   result.scanned = states.length;
   const now = Date.now();
+  const reconciliationGenerationId = randomUUID();
   const interruptedRunIds = new Set<string>();
 
   // PR/beta v1 incorrectly checkpointed ordinary transport failures as
@@ -329,6 +383,42 @@ export async function reconcileDurableRunTerminals(
     entry.state.telemetryDelivery.crashWindow = false;
     delete entry.state.langfuseCompletedAt;
     writeState(entry.filePath, entry.state);
+  }
+
+  const deferredRunIds = new Set<string>();
+  if (options.recoverBeforeInterrupt) {
+    const originalStates = new Map(states.map(entry => [entry.state.id, entry.state]));
+    states = states.filter(entry => {
+      try {
+        const recovered = options.recoverBeforeInterrupt!(entry.state, originalStates, now);
+        if (!recovered) return true;
+        const next = { ...entry.state, ...recovered };
+        // A validated local verdict can correct a previously derived restart
+        // failure. Its stale marker would otherwise replay a failed SSE end
+        // even though the durable status has now been repaired to succeeded.
+        if (recovered.status === 'succeeded' && entry.state.status === 'failed'
+          && entry.state.errorCode === RESTART_ERROR_CODE
+          && entry.state.terminalRecoveryReason === 'daemon_restart') {
+          delete next.terminalRecoveryReason;
+          if (next.terminalTrigger === 'daemon_restart') delete next.terminalTrigger;
+        }
+        if (!writeState(entry.filePath, next)) {
+          // SQL may already be committed. Leave the original physical snapshot
+          // untouched for the next local replay, rather than interrupting it.
+          deferredRunIds.add(entry.state.id);
+          console.warn('[runs] local terminal recovery persistence deferred', entry.state.id);
+          return false;
+        }
+        entry.state = next;
+        return true;
+      } catch (error) {
+        // An owner/SQL read failure cannot authorize a successful recovery.
+        // Defer this run without preventing siblings from reconciling.
+        deferredRunIds.add(entry.state.id);
+        console.warn('[runs] local terminal recovery deferred', entry.state.id, error);
+        return false;
+      }
+    });
   }
 
   for (const entry of states) {
@@ -357,7 +447,7 @@ export async function reconcileDurableRunTerminals(
   }
 
   const statesByRunId = new Map(states.map((entry) => [entry.state.id, entry.state]));
-  result.messagesReconciled = reconcileMessages(options.db, statesByRunId, now);
+  result.messagesReconciled = reconcileMessages(options.db, statesByRunId, now, deferredRunIds);
   for (const { state } of states) {
     if (state.status !== 'failed' && state.status !== 'canceled') continue;
     if (reconcileStrategyTaskRunTerminalIsolated(options.db, {
@@ -435,6 +525,31 @@ export async function reconcileDurableRunTerminals(
     const recoveryReason = state.terminalRecoveryReason ?? 'analytics_incomplete';
     const events = readEvents(options.runsLogDir, state.id);
     if (needsAnalytics && state.analyticsRecovery) {
+      state.terminalLifecycle = markTerminalLifecycleReconciled(
+        acknowledgeReadableTerminalPersistence(
+          state.terminalLifecycle ?? terminalLifecycleSnapshot({
+            cumulativeRetryAttemptCount: state.cumulativeRetryAttemptCount,
+            retryAttemptCount: state.retryAttemptCount,
+            manualResumeAttemptCount: state.manualResumeAttemptCount,
+            runtimeGenerationId: state.runtimeGenerationId,
+            cancelOrigin: state.cancelOrigin ?? null,
+            terminalTrigger: state.terminalTrigger ?? null,
+            terminalIntegrity: recoveredTerminalIntegrity(
+              state.analyticsRecovery.properties.terminal_integrity,
+            ),
+            terminalPersistence: {
+              status: 'acknowledged',
+              errorType: null,
+            },
+          }),
+        ),
+        reconciliationGenerationId,
+      );
+      state.terminalLifecycle = beginPosthogTerminalDelivery(state.terminalLifecycle);
+      writeState(entry.filePath, state);
+      const terminalLifecycleForCapture = terminalLifecycleForPosthogLocalQueue(
+        state.terminalLifecycle,
+      );
       const failed = state.status === 'failed';
       const runResult = runResultFromStatus(state.status);
       const errorCode = failed
@@ -464,10 +579,30 @@ export async function reconcileDurableRunTerminals(
         total_duration_ms: Math.max(0, state.updatedAt - state.createdAt),
         langfuse_trace_id: state.id,
         terminal_reconciled: true,
-        terminal_integrity: reconciledTerminalIntegrity(
-          state.analyticsRecovery.properties.terminal_integrity,
-        ),
+        terminal_integrity: terminalLifecycleForCapture.terminalIntegrity,
         terminal_recovery_reason: recoveryReason,
+        run_attempt: terminalLifecycleForCapture.runAttempt,
+        ...(terminalLifecycleForCapture.runtimeGenerationId
+          ? { runtime_generation_id: terminalLifecycleForCapture.runtimeGenerationId }
+          : {}),
+        termination_origin: terminalLifecycleForCapture.terminationOrigin,
+        terminal_persistence_status:
+          terminalLifecycleForCapture.terminalPersistence.status,
+        terminal_persistence_error_type:
+          terminalLifecycleForCapture.terminalPersistence.errorType,
+        posthog_delivery_status: terminalLifecycleForCapture.posthogDelivery.status,
+        posthog_acknowledgement:
+          terminalLifecycleForCapture.posthogDelivery.acknowledgement,
+        posthog_delivery_attempt_count:
+          terminalLifecycleForCapture.posthogDelivery.attemptCount,
+        posthog_error_type: terminalLifecycleForCapture.posthogDelivery.errorType,
+        reconciliation_generation:
+          terminalLifecycleForCapture.reconciliation?.generationId,
+        reconciliation_integrity:
+          terminalLifecycleForCapture.reconciliation?.integrity,
+        mature_unfinished_state: terminalLifecycleForCapture.unfinishedState,
+        duplicate_terminal_count: terminalLifecycleForCapture.duplicateTerminalCount,
+        late_terminal_count: terminalLifecycleForCapture.lateTerminalCount,
         ...(errorCode ? { error_code: errorCode } : {}),
         ...(failure ?? {}),
         ...summarizeRunDiagnosticsForAnalytics({
@@ -505,16 +640,33 @@ export async function reconcileDurableRunTerminals(
           : {}),
       };
       Object.assign(properties, buildRunFinishedV4Aliases(properties, taskLineage));
-      await Promise.resolve(options.analytics.capture({
-        eventName: 'run_finished',
-        context: state.analyticsRecovery.context,
-        appVersion: appVersionForRun(state, options),
-        properties,
-        insertId: `${state.analyticsRecovery.insertId}-finish`,
-      }));
-      state.analyticsRecovery.completedAt = Date.now();
+      let captureResult: AnalyticsCaptureResult;
+      try {
+        captureResult = normalizeAnalyticsCaptureResult(
+          await Promise.resolve(options.analytics.capture({
+            eventName: 'run_finished',
+            context: state.analyticsRecovery.context,
+            appVersion: appVersionForRun(state, options),
+            properties,
+            insertId: `${state.analyticsRecovery.insertId}-finish`,
+          })),
+        );
+      } catch {
+        captureResult = {
+          status: 'failed',
+          acknowledgement: 'none',
+          errorType: 'enqueue_failed',
+        };
+      }
+      state.terminalLifecycle = finalizePosthogTerminalDelivery(
+        state.terminalLifecycle,
+        captureResult,
+      );
+      if (captureResult.status !== 'failed') {
+        state.analyticsRecovery.completedAt = Date.now();
+        result.analyticsReplayed += 1;
+      }
       writeState(entry.filePath, state);
-      result.analyticsReplayed += 1;
     }
 
     if (needsLangfuse) {

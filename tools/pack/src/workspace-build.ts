@@ -47,7 +47,30 @@ export const WORKSPACE_BUILD_COMMANDS = [
   { args: ["--filter", "@open-design/packaged", "run", "build"] },
 ] as const;
 
-export const WORKSPACE_BUILD_CACHE_SCHEMA_VERSION = 10;
+export const WORKSPACE_BUILD_CACHE_SCHEMA_VERSION = 11;
+
+/**
+ * V8 old-space ceiling (MB) for the packaged closure build, the stage that runs
+ * `next build` for apps/web. Next type-checks apps/web in-process against the
+ * app tsconfig (src and tests alike), and since the Home entry refresh (#8208)
+ * that pass needs more than Node's 2 GB default: on GitHub's macos-14 and
+ * macos-15-intel runners it dies deterministically with "JavaScript heap out of
+ * memory" during "Running TypeScript". 4 GB fits the 7 GB runners. The ceiling
+ * changes how much memory the build may use, never what it emits, so it is not
+ * a cache-key determinant and does not bump the schema version.
+ */
+export const WORKSPACE_BUILD_MAX_OLD_SPACE_MB = 4096;
+
+/**
+ * NODE_OPTIONS handed to the closure build: our heap ceiling first, then whatever
+ * the caller already had, so a caller's own `--max-old-space-size` still wins
+ * (Node honours the last occurrence).
+ */
+export function workspaceBuildNodeOptions(inherited: string | undefined): string {
+  return [`--max-old-space-size=${WORKSPACE_BUILD_MAX_OLD_SPACE_MB}`, inherited?.trim()]
+    .filter((part) => part)
+    .join(" ");
+}
 
 export type WorkspaceBuildCacheKeyInputs = {
   buildCommands: unknown;
@@ -148,7 +171,10 @@ export async function runWorkspaceBuild(
     await runPnpm([...WORKSPACE_BUILD_COMMANDS[0].args]);
     await runPnpm(
       [...WORKSPACE_BUILD_COMMANDS[1].args],
-      { OD_WEB_OUTPUT_MODE: config.webOutputMode },
+      {
+        NODE_OPTIONS: workspaceBuildNodeOptions(process.env.NODE_OPTIONS),
+        OD_WEB_OUTPUT_MODE: config.webOutputMode,
+      },
     );
     await runPnpm([...WORKSPACE_BUILD_COMMANDS[2].args]);
     await runPnpm([...WORKSPACE_BUILD_COMMANDS[3].args]);
@@ -179,6 +205,7 @@ function workspaceBuildOutputFiles(config: ToolPackConfig): string[] {
     "packages/platform/dist/index.mjs",
     "packages/platform/dist/index.d.ts",
     "packages/sidecar/dist/index.mjs",
+    "packages/sidecar/dist/supervisor.mjs",
     "packages/sidecar/dist/index.d.ts",
     "packages/download/dist/index.mjs",
     "packages/download/dist/index.d.ts",
