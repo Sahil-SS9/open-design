@@ -23,10 +23,17 @@
  * ⚠️ 判据只写「用户看不到 `<od-card` 原文」,**不规定**怎么做到 —— 这是行为级的,
  * 不断言某个函数被调用过。
  *
- * ── 不在本文件范围内 ──────────────────────────────────────────────
- * `splitOnOdCards` 对**解析失败**的卡保留原文(源码注释:`Malformed — keep raw
- * text so the user can still see it`)是刻意约定,改不改是产品裁决点,**另有裁决**,
- * 本文件不碰。
+ * ── 解析失败的卡:裁决已下(2026-09-18)───────────────────────────
+ * `splitOnOdCards` 原本对**解析失败**的卡保留原文(源码注释:`Malformed — keep raw
+ * text so the user can still see it`)。用户裁决把它推翻了:
+ *
+ *   「od-card 如果 json 不对, 就不显示, 不然用户会觉得是乱码...还不如不显示」
+ *
+ * 于是 §② 钉住这条:JSON 尾逗号 / 缺 `summary` / `type` 拼错 —— 三种模型自己拼 chip
+ * 时真会犯的手滑 —— 都**不得**把 `<od-card …>{…}</od-card>` 当成用户正文画出来。
+ *
+ * ⚠️ 「写坏了」和「还在写」是两回事:一张卡在流式里是一个 delta 一个 delta 长出来的,
+ * 任何一帧都还没闭合,那不是畸形块。§② 边界那一节钉住这条,防止裁决顺手把流式吞掉。
  *
  * ── 反向锚点(少了它修复会退化成「见 od-card 就吞」)────────────────
  * ① 围栏代码块里引用的 od-card **必须**留着原文:那是文档/教程在讲协议本身。
@@ -37,6 +44,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessage } from '../../../src/components/AssistantMessage';
+import { SayBlock } from '../../../src/components/chat/SayBlock';
 import {
   ThinkingMarkdown,
   THINKING_MARKDOWN_COMMIT_MS,
@@ -54,6 +62,13 @@ const VALID_CARD = memoryWrittenCardContent(
   { key: 'ext-2745', count: 1, entries: [{ id: 'user_profile', name: 'Work profile', type: 'profile' }] },
   '已记住 1 条偏好',
 );
+
+/** 解析失败的三种真实手滑,都保留了完整的开闭标签 —— 它们是**写完了的**,不是写到一半。 */
+const UNPARSEABLE = {
+  'JSON 尾逗号': '<od-card type="memory-applied">{"summary":"已记住 1 条偏好","used":[],}</od-card>',
+  '缺 summary': '<od-card type="memory-applied">{"used":[{"type":"profile","name":"Work profile"}]}</od-card>',
+  'type 拼错': '<od-card type="memory-written">{"summary":"已记住 1 条偏好","used":[]}</od-card>',
+} as const;
 
 function renderAssistantProse(content: string): string {
   render(
@@ -205,6 +220,94 @@ describe('OPEND-2745 ① 流式:卡片不进逐字化开', () => {
       document.querySelector('[data-od-card="memory-applied"]')?.contains(revealed ?? null),
       '化开的字落在卡片里,而不是落在新写的那段散文上',
     ).toBe(false);
+  });
+});
+
+/**
+ * **产品裁决(用户,2026-09-18):解析失败的卡宁可不显示。**
+ *
+ *   「od-card 如果 json 不对, 就不显示, 不然用户会觉得是乱码...还不如不显示」
+ *
+ * 这一节盖住两条通道:壳外正文(`AssistantMessage`)和壳内叙述(`SayBlock`)。
+ *
+ * ⚠️ 判据只写「用户看不到 `<od-card` 原文」,**不规定**怎么做到 —— 隐藏、降级成
+ * 一句纯文本、或者补全解析都能让它变绿。选哪种是产品裁决,不是这条测试的事。
+ * 正向锚点(正文还在)每条都带着:少了它,整块没渲染也能假绿。
+ */
+describe('OPEND-2745 ② 解析失败的卡不得当成用户正文', () => {
+  for (const [label, raw] of Object.entries(UNPARSEABLE)) {
+    it(`壳外正文 · ${label}`, () => {
+      const text = renderAssistantProse(`偏好已经读过了。\n\n${raw}`);
+      expect(text, '这条消息整块没渲染 —— 夹具坏了').toContain('偏好已经读过了');
+      expect(text, '解析失败的 od-card 原文被当成正文画出来了(用户裁决:宁可不显示)')
+        .not.toContain('<od-card');
+    });
+
+    it(`壳内叙述 · ${label}`, () => {
+      render(<SayBlock text={`偏好已经读过了。\n\n${raw}`} live={false} />);
+      const text = document.body.textContent ?? '';
+      expect(text, '这一段整块没渲染 —— 夹具坏了').toContain('偏好已经读过了');
+      expect(text, '解析失败的 od-card 原文被当成壳内叙述画出来了(用户裁决:宁可不显示)')
+        .not.toContain('<od-card');
+    });
+  }
+
+  /**
+   * 丢掉一张卡**不能**顺手把它后面那张好卡顶成原文。
+   *
+   * 畸形载荷里藏一个独占一行、没闭合的 ``` 围栏:只要 markdown 上下文还是按**含
+   * 被丢弃载荷的原文**算的,这个围栏就把它之后的一切标成代码 —— 后面那张完全合法
+   * 的卡因此不会被解码,最后从兜底的 `appendText` 里原样吐给用户。
+   *
+   * 即:一个本来为了消灭标签泄漏的改动,自己开了一条新的泄漏路径。
+   */
+  it('畸形载荷里的围栏不得把它后面的合法卡顶成原文', () => {
+    const malformedWithFence =
+      '<od-card type="memory-applied">{"summary":"坏掉的那张",\n```\n"used":[],}</od-card>';
+    const text = renderAssistantProse(`${malformedWithFence}\n\n${VALID_CARD}`);
+
+    expect(
+      document.querySelector('[data-od-card="memory-applied"]'),
+      '畸形卡后面那张合法卡没渲染成卡 —— 被丢弃载荷里的围栏把它标成代码了',
+    ).not.toBeNull();
+    expect(text, '合法卡的标签原文被兜底路径原样吐出来了 —— 修复自己开了新的泄漏口')
+      .not.toContain('<od-card');
+    expect(text, '夹具坏了 —— 合法卡的正文没上屏').toContain('已记住 1 条偏好');
+  });
+});
+
+/**
+ * ⚠️ **边界:「还在写」不是「写坏了」。**
+ *
+ * 上面那条裁决只管**已经闭合、但解析失败**的块。流式期间一张卡是一个 delta 一个
+ * delta 长出来的,任何一帧都还没闭合 —— 它既不能被裁决提前当成畸形块吞掉(那样卡
+ * 永远上不了屏),也不能因为「反正最后要丢」就把半截标签闪出来。
+ *
+ * 逐帧走完一整条流式轨迹:半个标签名 → 开标签写完 → JSON 写到一半 → 闭合。
+ */
+describe('OPEND-2745 ② 边界:流式未闭合的卡不是解析失败', () => {
+  it('半截卡逐帧推进到闭合:全程不露原文,最终照旧渲染成卡', () => {
+    const PROSE = '先看一下用户的偏好。';
+    const frames = [
+      `${PROSE}\n\n<od-ca`,
+      `${PROSE}\n\n<od-card type="memory-applied">`,
+      `${PROSE}\n\n<od-card type="memory-applied">{"summary":"已记`,
+      `${PROSE}\n\n${VALID_CARD}`,
+    ];
+
+    const { rerender } = render(<SayBlock text={frames[0] as string} live />);
+    for (const frame of frames) {
+      rerender(<SayBlock text={frame} live />);
+      const text = document.body.textContent ?? '';
+      expect(text, '还没闭合的卡把它前面已经写完的叙述一起吞了').toContain(PROSE);
+      expect(text, '还在写的卡把标签原文闪给用户看了').not.toContain('<od-card');
+    }
+
+    expect(
+      document.querySelector('[data-od-card="memory-applied"]'),
+      '卡闭合之后没渲染成卡 —— 流式未闭合被当成解析失败一起吞掉了',
+    ).not.toBeNull();
+    expect(document.body.textContent ?? '').toContain('已记住 1 条偏好');
   });
 });
 

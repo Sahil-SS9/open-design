@@ -120,6 +120,7 @@ import {
 } from '../runtime/amr-balance-branch';
 import { installDeepSeekHarnessCompanion } from '../providers/agent-companion';
 import {
+  amrBalanceGateFromMemory,
   amrBalanceGateScopeForWorkspaceContext,
   checkAmrBalanceGate,
   retryUnavailableAmrBalanceGate,
@@ -770,6 +771,10 @@ export function EntryShell({
     deepSeekV4FlashCampaignAudience === 'unknown'
       ? null
       : deepSeekV4FlashCampaignAudience;
+  // The CMS touchpoints this rail hosts are home placements (`opend.home.*`).
+  // The rail itself rides every entry view, so the home view — not the rail —
+  // is what decides whether they may be on screen.
+  const homeCampaignHostsVisible = view === 'home';
   const workspaceBalanceUsd = workspaceBillingBalanceUsd(
     workspaceBillingResponse,
     workspaceContext,
@@ -1427,6 +1432,59 @@ export function EntryShell({
       return 'blocked' as const;
     }
     const createInput = pluginLoopCreateInput(payload);
+    const isAmrSend = config.mode === 'daemon' && config.agentId === 'amr';
+    const amrModelId = isAmrSend
+      ? effectiveAgentModelId(
+          agents.find((agent) => agent.id === 'amr'),
+          config.agentModels?.amr,
+        )
+      : undefined;
+    // OPEND-3300 / 3309: a wallet this shell already knows is empty is
+    // answered HERE, on the click tick, before the project frame opens — the
+    // dialog lands on Home, no frame, no project, no request. The reading is
+    // the one the rail's 额度 pill shows for the exact scope the send would
+    // run in. One background confirmation re-reads the wallet; only a
+    // non-blocking answer (a recharge the projection had not seen) moves the
+    // send forward, and a dismiss in the meantime wins.
+    if (isAmrSend) {
+      const memoryWorkspaceState = workspaceContextStateRef.current;
+      const memoryWorkspaceContext = memoryWorkspaceState.failure === 'unsupported'
+        ? null
+        : workspaceResourceReadContext(memoryWorkspaceState);
+      const memoryVerdict = amrBalanceGateFromMemory(
+        workspaceBillingBalanceUsd(workspaceBillingResponse, memoryWorkspaceContext),
+        { updatedAt: workspaceBillingResponse?.workspaceBalance?.updatedAt ?? null },
+      );
+      if (memoryVerdict) {
+        const memoryScope = amrBalanceGateScopeForWorkspaceContext(memoryWorkspaceContext);
+        const blockedBranch = resolveAmrBalanceBranch({
+          context: memoryWorkspaceContext,
+          billing: workspaceBilling,
+        });
+        const decision = await new Promise<'retry' | 'dismiss'>((resolve) => {
+          onAmrBalanceGateBlockChange({
+            reason: memoryVerdict.reason,
+            dialog: amrBalanceBlockedDialog(blockedBranch),
+            upgradeIntent: amrBalanceDialogUpgradeIntent(blockedBranch),
+            snapshot: memoryVerdict.snapshot,
+            resolve,
+          });
+          void checkAmrBalanceGate(memoryScope, amrModelId)
+            .then((confirmed) => {
+              // Still empty, or unreadable: the in-memory answer stands and
+              // the dialog stays. Anything else proved the projection stale.
+              if (confirmed.kind !== 'hard' && confirmed.kind !== 'unavailable') {
+                resolve('retry');
+              }
+            })
+            .catch(() => undefined);
+        });
+        onAmrBalanceGateBlockChange(null);
+        if (decision === 'dismiss') return 'blocked' as const;
+        // 'retry': the wallet proved fundable (recharge landed, or the
+        // confirmation read positive). Fall through to the ordinary path.
+      }
+    }
     // OPEND-2614: the project frame opens on the click tick for EVERY agent,
     // before any admission check. Everything below runs behind that frame —
     // this shell is unmounted the moment the hand-off navigates, so nothing
@@ -1440,11 +1498,7 @@ export function EntryShell({
     // ProjectView.handleSend.
     let amrGatePrecheckWitness: AmrBalanceGateScope | undefined;
     let amrGatePrecheckPassed = false;
-    if (config.mode === 'daemon' && config.agentId === 'amr') {
-      const amrModelId = effectiveAgentModelId(
-        agents.find((agent) => agent.id === 'amr'),
-        config.agentModels?.amr,
-      );
+    if (isAmrSend) {
       // PRODUCT INVARIANT: Send never starts Workspace identity discovery.
       // Billing consumes the shell's current in-memory snapshot; if it has not
       // arrived yet, the existing account-scoped gate is used. The daemon's
@@ -1791,7 +1845,7 @@ export function EntryShell({
           }}
           onOpenSearch={() => setProjectSearchOpen(true)}
           open={railOpen}
-          topRightSlot={topRightCampaignAudience || amrLoggedIn === true ? (
+          topRightSlot={topRightCampaignAudience || (homeCampaignHostsVisible && amrLoggedIn === true) ? (
             <>
               {topRightCampaignAudience ? (
                 <WorkbenchCampaignBadge
@@ -1802,13 +1856,16 @@ export function EntryShell({
                   loggedIn={amrLoggedIn}
                 />
               ) : null}
-              {canRenderProductionCampaignBadge(amrLoggedIn === true, amrAccountId) ? <ProductionCampaignBadge authenticated sessionSubject={amrAccountId} /> : null}
+              {homeCampaignHostsVisible
+                && canRenderProductionCampaignBadge(amrLoggedIn === true, amrAccountId) ? <ProductionCampaignBadge authenticated sessionSubject={amrAccountId} /> : null}
               {/* The requirements-specific hover entry is its own authorized
                   touchpoint, beside—not renamed from—the account badge. */}
-              <ProductionCampaignHover
-                authenticated={amrLoggedIn === true}
-                sessionSubject={amrAccountId}
-              />
+              {homeCampaignHostsVisible ? (
+                <ProductionCampaignHover
+                  authenticated={amrLoggedIn === true}
+                  sessionSubject={amrAccountId}
+                />
+              ) : null}
             </>
           ) : null}
           context={railWorkspaceContext}
