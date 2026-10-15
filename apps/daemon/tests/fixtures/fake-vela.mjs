@@ -47,6 +47,9 @@
  *   FAKE_VELA_LOGIN_USER_PLAN    – plan written into the saved profile
  *   FAKE_VELA_SESSION_NEW_ERROR  – when set, session/new returns a JSON-RPC error
  *   FAKE_VELA_SET_MODEL_ERROR    – when set, session/set_model returns a JSON-RPC error
+ *   FAKE_VELA_SET_MODEL_UNAVAILABLE – comma-separated model ids that
+ *                                   session/set_model rejects the way real vela
+ *                                   rejects ids outside its catalog
  *   FAKE_VELA_PROMPT_ERROR       – when set, session/prompt returns a JSON-RPC error
  *   FAKE_VELA_PROMPT_ERROR_ON_LOAD – when set, session/prompt errors only after session/load
  *   FAKE_VELA_STALL_AFTER_PROMPT – when set to '1', session/prompt never completes
@@ -90,6 +93,13 @@
  *   FAKE_VELA_MODELS             – newline-separated `vela models` stdout
  *   FAKE_VELA_MODEL_PRESET_JSON  – JSON stdout for `model preset --format json`
  *   FAKE_VELA_MODEL_LIST_JSON    – JSON stdout for `model list --all --format json`
+ *   FAKE_VELA_MODEL_LIST_DELAY_MS – delay that remote `model list` answer, so a
+ *                                   run can start before the per-user catalog
+ *   FAKE_VELA_LOG_SET_MODEL_REQUEST – when '1', log every requested set_model id,
+ *                                   including ones rejected below
+ *   FAKE_VELA_ALLOWED_MODELS     – comma-separated ids the caller's plan allows;
+ *                                   session/set_model rejects any other id the
+ *                                   way vela does against its per-user catalog
  *   FAKE_VELA_REQUIRE_SET_MODEL  – strict gate (default on); set to '0' to
  *                                   accept session/prompt without prior
  *                                   session/set_model (legacy behaviour)
@@ -118,6 +128,7 @@ const ASSISTANT_TEXT = Object.prototype.hasOwnProperty.call(env, 'FAKE_VELA_TEXT
 const THOUGHT_TEXT = env.FAKE_VELA_THOUGHT || '';
 const SESSION_NEW_ERROR = env.FAKE_VELA_SESSION_NEW_ERROR || '';
 const SET_MODEL_ERROR = env.FAKE_VELA_SET_MODEL_ERROR || '';
+const unavailableModels = new Set((env.FAKE_VELA_SET_MODEL_UNAVAILABLE || '').split(',').map((id) => id.trim()).filter(Boolean));
 const PROMPT_ERROR = env.FAKE_VELA_PROMPT_ERROR || '';
 const PROMPT_ERROR_ON_LOAD = env.FAKE_VELA_PROMPT_ERROR_ON_LOAD || '';
 const STALL_AFTER_PROMPT = env.FAKE_VELA_STALL_AFTER_PROMPT === '1';
@@ -338,7 +349,20 @@ function handleMessage(msg) {
         return;
       }
       const next = typeof params?.modelId === 'string' ? params.modelId.trim() : '';
+      if (env.FAKE_VELA_LOG_SET_MODEL_REQUEST === '1') {
+        logInvocation(`set_model_request:${next || '<empty>'}`);
+      }
+      const allowed = (env.FAKE_VELA_ALLOWED_MODELS || '').split(',').map((m) => m.trim()).filter(Boolean);
+      if (allowed.length > 0 && !allowed.includes(next)) {
+        writeError(id, 'session/set_model modelId is not available', -32602);
+        return;
+      }
       const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : SESSION_ID;
+      if (unavailableModels.has(next)) {
+        if (env.FAKE_VELA_LOG_SET_MODEL === '1') logInvocation(`set_model_rejected:${next}`);
+        writeError(id, 'session/set_model modelId is not available', -32602);
+        return;
+      }
       if (next) currentModelId = next;
       if (env.FAKE_VELA_LOG_SET_MODEL === '1') {
         logInvocation(`set_model:${next || '<empty>'}`);
@@ -494,6 +518,8 @@ stdin.on('data', (chunk) => {
 
 stdin.on('end', () => {
   if (argv[2] === 'login') return;
+  // A delayed `model list` finishes on its own timer.
+  if (argv[2] === 'model') return;
   stdout.end();
   // Mirror real ACP runtimes that exit on EOF so the host's child.on('close')
   // fires promptly and the chat run can finalize.
@@ -745,7 +771,10 @@ if (argv[2] === 'model' && argv.includes('--format') && argv.includes('json')) {
     exit(0);
   }
   if (argv[3] === 'list') {
-    stdout.write(`${env.FAKE_VELA_MODEL_LIST_JSON || DEFAULT_MODEL_LIST_JSON}\n`);
-    exit(0);
+    const delayMs = Number(env.FAKE_VELA_MODEL_LIST_DELAY_MS) || 0;
+    setTimeout(() => {
+      stdout.write(`${env.FAKE_VELA_MODEL_LIST_JSON || DEFAULT_MODEL_LIST_JSON}\n`);
+      exit(0);
+    }, delayMs);
   }
 }

@@ -27,6 +27,8 @@ import {
   startServer,
 } from '../src/server.js';
 import { skillCwdAliasSegment } from '../src/cwd-aliases.js';
+import { amrModelLoadingCache } from '../src/runtimes/amr-model-cache.js';
+import { resetLiveModelsForTests } from '../src/runtimes/models.js';
 import { getAgentDef } from '../src/agents.js';
 import { readAppConfig, writeAppConfig } from '../src/app-config.js';
 import { readMemoryConfig, writeMemoryConfig } from '../src/memory.js';
@@ -145,7 +147,7 @@ describe('/api/chat', () => {
     };
   }
 
-  async function runAmrModelRequest(model: string): Promise<{
+  async function runAmrModelRequest(model: string, extraEnv: Record<string, string> = {}): Promise<{
     body: string;
     invocations: string[];
     responseOk: boolean;
@@ -159,7 +161,9 @@ describe('/api/chat', () => {
     const previousLogSetModel = process.env.FAKE_VELA_LOG_SET_MODEL;
     const previousLogPrompt = process.env.FAKE_VELA_LOG_PROMPT;
     const invocationLog = join(tmpdir(), `od-amr-model-request-${randomUUID()}.jsonl`);
+    const previousExtraEnv = Object.fromEntries(Object.keys(extraEnv).map((key) => [key, process.env[key]]));
     try {
+      Object.assign(process.env, extraEnv);
       process.env.VELA_RUNTIME_KEY = `fake-runtime-key-${randomUUID()}`;
       process.env.VELA_LINK_URL = 'https://amr-link.open-design.ai/v1';
       process.env.FAKE_VELA_INVOCATION_LOG = invocationLog;
@@ -214,6 +218,10 @@ child.on('exit', (code, signal) => {
       return { body, invocations, responseOk };
     } finally {
       rmSync(invocationLog, { force: true });
+      for (const [key, value] of Object.entries(previousExtraEnv)) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
       if (previousRuntimeKey == null) delete process.env.VELA_RUNTIME_KEY;
       else process.env.VELA_RUNTIME_KEY = previousRuntimeKey;
       if (previousLinkUrl == null) delete process.env.VELA_LINK_URL;
@@ -1245,6 +1253,24 @@ process.exit(1);
     expect(body).toContain('"status":"succeeded"');
   });
 
+  // AMR 0.24.1, 10/5-10/7: 9 runs from 7 users failed with "session/set_model
+  // modelId is not available" because the saved model had left the AMR catalog.
+  it('switches to the AMR catalog default when vela rejects a delisted model', async () => {
+    const { body, invocations, responseOk } = await runAmrModelRequest('claude-opus-4.8', {
+      FAKE_VELA_SET_MODEL_UNAVAILABLE: 'claude-opus-4.8',
+    });
+
+    expect(responseOk).toBe(true);
+    expect(invocations[0]).toBe('new');
+    expect(invocations[1]).toBe('set_model_rejected:claude-opus-4.8');
+    expect(invocations[2]).toMatch(/^set_model:(deepseek-v4-flash|deepseek-v3\.2)$/);
+    expect(invocations[3]).toBe('prompt');
+    expect(body).toContain('"label":"model_fallback"');
+    expect(body).toContain('claude-opus-4.8 is no longer available in AMR.');
+    expect(body).not.toContain('AMR_MODEL_UNAVAILABLE');
+    expect(body).toContain('"status":"succeeded"');
+  });
+
   it('survives transient AMR Link catalog failures without aborting the run', async () => {
     // The run preflight resolves the AMR catalog through the shared
     // AmrModelLoadingCache, which degrades to the offline `vela model preset`
@@ -1515,6 +1541,87 @@ child.on('exit', (code, signal) => {
       else process.env.FAKE_VELA_MODEL_PRESET_JSON = previousPreset;
       if (previousList == null) delete process.env.FAKE_VELA_MODEL_LIST_JSON;
       else process.env.FAKE_VELA_MODEL_LIST_JSON = previousList;
+    }
+  });
+
+  it('resolves an AMR default model from the caller catalog, not the shared preset seed', async () => {
+    // A free-tier caller: the bundled preset lists deepseek-v4-flash first, but
+    // the per-user catalog only allows deepseek-v4.1-flash. A run started before
+    // that catalog arrives must not turn `default` into a model vela rejects.
+    const saved = Object.fromEntries([
+      'VELA_RUNTIME_KEY', 'VELA_LINK_URL', 'FAKE_VELA_MODEL_PRESET_JSON', 'FAKE_VELA_MODEL_LIST_JSON',
+      'FAKE_VELA_MODEL_LIST_DELAY_MS', 'FAKE_VELA_ALLOWED_MODELS', 'FAKE_VELA_LOG_SET_MODEL_REQUEST', 'FAKE_VELA_INVOCATION_LOG',
+    ].map((key) => [key, process.env[key]]));
+    const invocationLog = join(mkdtempSync(join(tmpdir(), 'od-amr-default-model-')), 'vela.log');
+    try {
+      amrModelLoadingCache.resetForTests();
+      resetLiveModelsForTests();
+      process.env.VELA_RUNTIME_KEY = `fake-runtime-key-${randomUUID()}`;
+      process.env.VELA_LINK_URL = 'https://amr-link.open-design.ai/v1';
+      process.env.FAKE_VELA_MODEL_PRESET_JSON = JSON.stringify({
+        source: 'preset',
+        data: [{ id: 'deepseek-v4-flash' }, { id: 'deepseek-v4-pro' }],
+      });
+      process.env.FAKE_VELA_MODEL_LIST_JSON = JSON.stringify({
+        source: 'remote',
+        data: [
+          { id: 'deepseek-v4.1-flash', enabled: true, default: true },
+          { id: 'deepseek-v4-flash', enabled: false },
+          { id: 'deepseek-v4-pro', enabled: false },
+        ],
+      });
+      process.env.FAKE_VELA_MODEL_LIST_DELAY_MS = '1500';
+      process.env.FAKE_VELA_ALLOWED_MODELS = 'deepseek-v4.1-flash';
+      process.env.FAKE_VELA_LOG_SET_MODEL_REQUEST = '1';
+      process.env.FAKE_VELA_INVOCATION_LOG = invocationLog;
+      const workspaceFixture =
+        await createPersonalWorkspaceBoundProjectFixture('AMR default model fixture');
+
+      await withFakeAgent(
+        'vela',
+        `
+const { spawn } = require('node:child_process');
+const fixture = ${JSON.stringify(FAKE_VELA_FIXTURE)};
+const child = spawn(process.execPath, [fixture, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: process.env,
+});
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  process.exit(code ?? 0);
+});
+`,
+        async () => {
+          const createResponse = await fetch(`${baseUrl}/api/runs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...workspaceFixture.headers },
+            body: JSON.stringify({
+              agentId: 'amr',
+              projectId: workspaceFixture.projectId,
+              model: 'default',
+              message: 'hello',
+              currentPrompt: 'hello',
+            }),
+          });
+          expect(createResponse.status).toBe(202);
+          const { runId } = await createResponse.json() as { runId: string };
+          const statusBody = await waitForRunStatus(baseUrl, runId);
+          const requested = readFileSync(invocationLog, 'utf8')
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => (JSON.parse(line) as { method: string }).method)
+            .filter((method) => method.startsWith('set_model_request:'));
+          expect(requested).toEqual(['set_model_request:deepseek-v4.1-flash']);
+          expect(statusBody.status).toBe('succeeded');
+        },
+      );
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
+      amrModelLoadingCache.resetForTests();
+      resetLiveModelsForTests();
     }
   });
 
