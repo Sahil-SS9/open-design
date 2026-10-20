@@ -153,6 +153,7 @@ import { TeamSlotPlaceholder } from './TeamSlotPlaceholder';
 import {
   notifyTeamProjectsChanged,
   notifyWorkspaceBillingRefresh,
+  shouldRefreshWorkspaceBilling,
   notifyWorkspaceContextRefresh,
   currentWorkspaceAccountGeneration,
   useTeamProjects,
@@ -779,6 +780,21 @@ export function EntryShell({
     // trigger more requests on unrelated composer renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeFundingIdentity]);
+  useEffect(() => {
+    // Reuse successful scoped billing publications (SSE, focus or fallback).
+    // Only an existing Home block needs this extra model-specific recovery read.
+    if (!homeFundingIdentity || !homeFundingScope || !workspaceBillingResponse ||
+      workspaceBillingBalanceUsd(workspaceBillingResponse, homeFundingContext) == null ||
+      !cachedHomeAmrFundingBlock(homeFundingScope, homeFundingModelId)) return;
+    let active = true;
+    invalidateAmrFundingFeedback();
+    void checkAmrFundingFeedback(homeFundingScope, homeFundingModelId,
+      () => active && homeFundingIdentityRef.current === homeFundingIdentity);
+    return () => { active = false; };
+    // Billing response identity changes only when the shared hook publishes a
+    // new read. Unrelated composer renders must not schedule recovery requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [homeFundingIdentity, workspaceBillingResponse]);
   const [goPlanSunsetMessagePending, setGoPlanSunsetMessagePending] = useState(false);
   const deepSeekCampaignVisibility = useDeepSeekV4FlashCampaignVisibility();
   // Same personal-vs-team accountPlan rule as App's `resolvedAmrPlan`.
@@ -1010,7 +1026,15 @@ export function EntryShell({
     workspaceContext?.workspaceId,
     workspaceContext?.workspaceType,
   ]);
+  const invalidateHomeFunding = (event: Parameters<typeof shouldRefreshWorkspaceBilling>[0]) => {
+    if (shouldRefreshWorkspaceBilling(event, homeFundingContext)) invalidateAmrFundingFeedback();
+  };
   useWorkspaceInvalidation({
+    // Reuse the billing stream to expire hints, without adding funding reads.
+    'billing-changed': invalidateHomeFunding,
+    'billing-subscription-changed': invalidateHomeFunding,
+    'wallet-balance-changed': invalidateHomeFunding,
+    'coding-plan-usage-changed': invalidateHomeFunding,
     'team-project-content-ready': ({ projectId, workspaceId }) => {
       const currentWorkspaceId = workspaceContext?.workspaceId;
       const currentWorkspaceMemberId = workspaceContext?.workspaceMemberId;
@@ -1480,7 +1504,7 @@ export function EntryShell({
       );
       // Restore #8240's pre-handoff memory gate using both the wallet and
       // Coding Plan projection. The existing billing stream/fallback refreshes
-      // this projection even after the independent hint's short TTL expires.
+      // this projection; confirmed backend insufficiency survives cache refreshes.
       const memoryBlock = amrBalanceGateFromMemory(
         workspaceBillingBalanceUsd(workspaceBillingResponse, homeFundingContext),
         { scope, modelId: amrModelId, preflight: workspaceBillingResponse?.preflight, profile: amrProfile },
@@ -1504,11 +1528,10 @@ export function EntryShell({
             upgradeIntent: amrBalanceDialogUpgradeIntent(branch), snapshot: { ...cachedBlock, profile: amrProfile ?? cachedBlock.profile },
             modelId: amrModelId, fundingScope: scope, resolve: finish,
           });
-          // Only confirmed funding can resume this parked send. A failed read
-          // keeps the dialog open; dismissal preserves the draft for a new try.
-          void checkAmrFundingFeedback(scope, amrModelId ?? null).then((result) => {
+          // Refresh the hint for the user's next send. Background confirmation
+          // must not dismiss this dialog or submit the parked draft.
+          void checkAmrFundingFeedback(scope, amrModelId ?? null).then(() => {
             if (identity !== homeFundingIdentityRef.current || accountGeneration !== currentWorkspaceAccountGeneration()) finish('dismiss');
-            else if (result === 'available') finish('retry');
           });
         });
         onAmrBalanceGateBlockChange(null);
@@ -1516,7 +1539,7 @@ export function EntryShell({
         invalidateAmrFundingFeedback();
       }
     }
-    // Without fresh negative evidence, the project frame opens on the click tick,
+    // Without known negative evidence, the project frame opens on the click tick,
     // before any admission check. Everything below runs behind that frame —
     // this shell is unmounted the moment the hand-off navigates, so nothing
     // after this line may rely on this instance's state or DOM. App owns the
@@ -4264,6 +4287,7 @@ function OnboardingByokSetupPanel({
             placement="top"
             searchable
             searchPlaceholder={t('newproj.modelSearch')}
+            allowCustomValue
           />
         ) : (
           <label className="onboarding-view__inline-field">
@@ -4499,6 +4523,13 @@ type OnboardingDropdownBaseProps = {
   searchPlaceholder?: string;
   sourceTone?: string;
   allowEmptyValue?: boolean;
+  /**
+   * When true (and not multi-select), a typed search query that doesn't match
+   * any existing option is offered as a selectable "Use '<query>'" entry, so
+   * users can pick a value that isn't in the suggested list (e.g. a locally
+   * installed Ollama model).
+   */
+  allowCustomValue?: boolean;
 };
 
 type OnboardingDropdownProps =
@@ -4526,6 +4557,7 @@ export function OnboardingDropdown(props: OnboardingDropdownProps) {
     searchPlaceholder,
     sourceTone,
     allowEmptyValue = false,
+    allowCustomValue = false,
   } = props;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -4551,12 +4583,27 @@ export function OnboardingDropdown(props: OnboardingDropdownProps) {
     : undefined;
   const triggerLabel = selectedLabel || placeholder;
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleOptions =
+  const trimmedQuery = query.trim();
+  const filteredOptions =
     searchable && normalizedQuery
       ? options.filter((option) =>
           `${option.label} ${option.value}`.toLowerCase().includes(normalizedQuery),
         )
       : options;
+  const canUseCustomValue =
+    allowCustomValue &&
+    !multiple &&
+    trimmedQuery.length > 0 &&
+    !options.some((option) => option.value.toLowerCase() === normalizedQuery);
+  const visibleOptions = canUseCustomValue
+    ? [
+        ...filteredOptions,
+        {
+          value: trimmedQuery,
+          label: t('settings.onboardingModelUseCustom', { query: trimmedQuery }),
+        },
+      ]
+    : filteredOptions;
   const emptyMessage = searchable ? t('homeHero.footer.noMatches') : t('settings.fetchModelsEmpty');
 
   useLayoutEffect(() => {

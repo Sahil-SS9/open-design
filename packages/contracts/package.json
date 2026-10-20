@@ -1,6 +1,6 @@
 {
   "name": "@open-design/contracts",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "private": true,
   "type": "module",
   "description": "Shared pure TypeScript contracts for the OpenDesign web/daemon boundary.",
@@ -89,6 +89,10 @@
     "./design-systems/token-schema": {
       "types": "./dist/design-systems/token-schema.d.ts",
       "default": "./dist/design-systems/token-schema.mjs"
+    },
+    "./prompts/comment-identity": {
+      "types": "./dist/prompts/comment-identity.d.ts",
+      "default": "./dist/prompts/comment-identity.mjs"
     },
     "./critique": {
       "types": "./dist/critique.d.ts",
