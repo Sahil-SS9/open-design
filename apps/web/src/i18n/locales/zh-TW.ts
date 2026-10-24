@@ -514,7 +514,7 @@ export const zhTW: Dict = {
   "settings.cloudCalloutButton": "登入 / 註冊",
   "settings.modeApiMeta": "API 供應商",
   "settings.byokNoFileToolsNotice":
-    "BYOK 無法讀取、寫入或編輯專案檔案。需要變更程式碼時，請使用 Local CLI。",
+    "BYOK 透過 OpenCode 讀取、寫入和編輯專案檔案，需要已安裝且可用的 OpenCode。",
   "settings.byokDraftNotice":
     "填寫必填欄位後即可儲存此供應商；目前的設定將繼續維持生效。",
   "settings.codeAgent": "程式碼代理",
@@ -828,8 +828,8 @@ export const zhTW: Dict = {
   "entry.tabConnectors": "連接器",
   "entry.openSettingsTitle": "設定",
   "entry.openSettingsAria": "開啟設定",
-  "entry.discordLabel": "加入 Discord",
-  "entry.discordAria": "加入 Discord 社群，領取使用額度",
+  "entry.communityLabel": "加入飛書群",
+  "entry.communityAria": "加入 OpenDesign 飛書群",
   "entry.discordAriaWithOnline": "加入 OpenDesign Discord - {online}",
   "entry.discordOnlineLabel": "{count} 在線",
   "entry.xAria": "追蹤 @OpenDesignHQ，掌握新功能",
@@ -978,6 +978,7 @@ export const zhTW: Dict = {
   "workspaceTabs.pluginDetails": "外掛詳細資料",
   "workspaceTabs.marketplace": "市集",
   "homeHero.title": "我們來設計點{word}",
+  "homeHero.titleUnselected": "你想創作什麼？",
   "homeHero.titleWords": "原型,簡報,文件",
   "homeHero.subtitle": "好的作品，從這裡開始",
   "homeHero.startWithTemplate": "從範本開始…",
@@ -1027,7 +1028,6 @@ export const zhTW: Dict = {
   "homeHero.loadingContext": "正在載入上下文…",
   "homeHero.noResults": "找不到「{query}」的結果。",
   "homeHero.searchPrompt": "搜尋檔案、外掛、技能、MCP 伺服器與連接器。",
-  "homeHero.parameters": "{n} 個參數",
   "homeHero.details": "詳細資料",
   "homeHero.toRun": "執行",
   "homeHero.forNewLine": "換行",
@@ -3264,7 +3264,7 @@ export const zhTW: Dict = {
     "選好設計系統再生成，結果會與品牌風格保持一致。",
   "designFiles.usefulInfoTip5":
     "沒有想法？試試首頁「社群」的外掛模板，一鍵生成同款。",
-  "designFiles.usefulInfoTip6": "遇到問題或有建議？加入 Discord 和我們聊聊。",
+  "designFiles.usefulInfoTip6": "遇到問題或有建議？加入飛書群和我們聊聊。",
   "designFiles.usefulInfoTip7": "覺得好用？在 GitHub 給我們點個 Star。",
   "designFiles.usefulInfoTip8":
     "在 X 上關注 @OpenDesignHQ，第一時間了解新功能。",
@@ -5938,7 +5938,7 @@ export const zhTW: Dict = {
   'labs.title': "Open Design 實驗室",
   'labs.itemAbout': "關於 {name}",
   'labs.navHint': "搶先體驗尚未正式發布的能力。",
-  'labs.pageDesc': "搶先體驗尚未正式發布的能力，通常已優於目前版本；隨時關閉即可恢復現狀。",
+  'labs.pageDesc': "搶先體驗仍在探索中的功能。功能及可用範圍可能隨版本調整。",
   'labs.harnessName': "Design Harness",
   'labs.harnessHint': "開啟後，下次生成將使用 OpenDesign 最新生成策略，生成效果更精緻（內測中）",
   'labs.harnessTooltip': "開啟後改用 Open Design 為設計場景打造的 agent harness，產物在版面、結構與完成度上會明顯更好。",
@@ -5967,5 +5967,7 @@ export const zhTW: Dict = {
   'comment.unsentDiscardNotice': '有尚未送出的評論。再次點擊將捨棄並切換。',
   'comment.anchorState.reanchored': '基於較舊版本',
   'comment.anchorState.stale': '錨點可能已移動',
+  'comment.saveTargetMissing': '評論目標已不存在，請重新選擇元素；草稿已保留。',
+  'comment.savePreviewNotReady': '預覽正在重新整理，草稿已保留，請在完成後重試儲存。',
   'comment.anchorState.lost': '錨點已遺失',
 };

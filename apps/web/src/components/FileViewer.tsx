@@ -1,3 +1,5 @@
+import { validateCommentSaveTarget } from '../comments/validate-save-target';
+import { previewStorageKey, readPreviewStorage, savePreviewStorageMessage } from '../runtime/preview-storage';
 import { commentSelectorsMatch, commentUsesIdentity, ownerCommentNeedsLocation, resolveOwnerCommentAnchor } from '../comments/owner-anchor';
 import { indexCommentTargets } from '../comments/target-index';
 import { useShareSourceGuard } from './share/useShareSourceGuard';
@@ -89,6 +91,8 @@ import {
   reportPreviewTransportRecovery,
   subscribePreviewIframeMessages,
   trackIframeLoad,
+  trackVisiblePreview,
+  isPreviewFrameVisible,
   type PreviewTransportDocumentState,
   type PreviewTransportRecoverySignal,
 } from '../observability/iframe-error';
@@ -248,6 +252,7 @@ import {
   hasTweaksTemplate,
   hasUrlModeBridge,
   htmlNeedsFocusGuard,
+  htmlNeedsLocalInteractionBridge,
   htmlNeedsPoweredPreview,
   htmlNeedsRedirectGuard,
   htmlNeedsSandboxShim,
@@ -427,6 +432,9 @@ type DeployResultCard = {
   message?: string;
 };
 const MAX_BRIDGE_COORDINATE = 1_000_000;
+// Client-side prototype forms need submit events in every interactive preview.
+// The ordinary sandbox retains its opaque origin and cannot access host APIs.
+const HTML_PREVIEW_SANDBOX = 'allow-scripts allow-forms allow-downloads';
 // Powered-preview iframe attributes. `allow-same-origin` is what makes real
 // Workers / Web Storage / SharedArrayBuffer possible; it is safe here because
 // the powered iframe loads from the daemon's preview-only loopback host, which
@@ -1758,6 +1766,8 @@ interface Props {
   filesRefreshKey?: number;
   isDeck?: boolean;
   streaming?: boolean;
+  /** Actual run state; unlike streaming, excludes read-only/loading UI locks. */
+  motionPreviewMuted?: boolean;
   commentQueueOnSend?: boolean;
   commentSendDisabled?: boolean;
   previewComments?: PreviewComment[];
@@ -1871,6 +1881,7 @@ export const FileViewer = memo(function FileViewer({
   filesRefreshKey = 0,
   isDeck,
   streaming,
+  motionPreviewMuted = false,
   commentQueueOnSend = false,
   commentSendDisabled = false,
   previewComments = [],
@@ -1986,6 +1997,7 @@ export const FileViewer = memo(function FileViewer({
         filesRefreshKey={filesRefreshKey}
         isDeck={rendererMatch.renderer.id === 'deck-html'}
         streaming={Boolean(streaming)}
+        motionPreviewMuted={motionPreviewMuted}
         commentQueueOnSend={commentQueueOnSend}
         commentSendDisabled={commentSendDisabled}
         previewComments={previewComments}
@@ -4082,7 +4094,7 @@ function FileVersionManagerModal({
             <iframe
               ref={versionPreviewIframeRef}
               title={selectedVersion ? `${file.name} v${selectedVersion.version}` : file.name}
-              sandbox="allow-scripts allow-downloads"
+              sandbox={HTML_PREVIEW_SANDBOX}
               srcDoc={srcDoc}
               onLoad={() => setLoadedSrcDoc(srcDoc)}
             />
@@ -7089,7 +7101,7 @@ function ReactComponentViewer({
             <iframe
               data-testid="react-component-preview-frame"
               title={file.name}
-              sandbox="allow-scripts allow-downloads"
+              sandbox={HTML_PREVIEW_SANDBOX}
               srcDoc={srcDoc}
               style={{ width: '100%', height: '100%', border: 0 }}
             />
@@ -7232,6 +7244,7 @@ function HtmlViewer({
   filesRefreshKey = 0,
   isDeck,
   streaming,
+  motionPreviewMuted = false,
   commentQueueOnSend = false,
   commentSendDisabled = false,
   previewComments = [],
@@ -7282,6 +7295,7 @@ function HtmlViewer({
   filesRefreshKey?: number;
   isDeck: boolean;
   streaming: boolean;
+  motionPreviewMuted?: boolean;
   commentQueueOnSend?: boolean;
   commentSendDisabled?: boolean;
   previewComments?: PreviewComment[];
@@ -9506,6 +9520,7 @@ function HtmlViewer({
   });
   const composerHoldsUnsentWorkRef = useRef(composerHoldsUnsentWork);
   composerHoldsUnsentWorkRef.current = composerHoldsUnsentWork;
+  const commentReselectPendingRef = useRef(false);
   const composerDiscardArmedRef = useRef(false);
   const [composerDiscardPending, setComposerDiscardPending] = useState(false);
   const disarmComposerDiscard = useCallback(() => {
@@ -10384,9 +10399,9 @@ function HtmlViewer({
   const assetInliningSource = effectiveDeck ? deckVisualSource : source;
   // Annotation modes that should hold the preview still while open. Manual
   // Edit is handled by its own freeze just below; these are the non-edit
-  // passes (Mark/Draw, Comment, Inspect) that also must not be yanked out
+  // passes (Mark/Draw, Inspect) that also must not be yanked out
   // from under the user by a background file change.
-  const annotationFreezeActive = drawOverlayOpen || boardMode || inspectMode;
+  const annotationFreezeActive = drawOverlayOpen || inspectMode;
   // Freeze the iframe input on the snapshot taken at Edit-mode entry. Any
   // source rewrite during edit (1.5s debounced set-style patches) stays
   // invisible to the iframe — live updates flow through od-edit-preview-style
@@ -10454,6 +10469,10 @@ function HtmlViewer({
     const s = routingHtmlSource;
     return s != null && htmlNeedsSandboxShim(s);
   }, [passiveLargeHtmlPreview, routingHtmlSource]);
+  const needsLocalInteractionBridge = useMemo(() => {
+    if (passiveLargeHtmlPreview) return false;
+    return routingHtmlSource != null && htmlNeedsLocalInteractionBridge(routingHtmlSource);
+  }, [passiveLargeHtmlPreview, routingHtmlSource]);
   const needsFocusGuard = useMemo(() => {
     if (passiveLargeHtmlPreview) return false;
     const s = routingHtmlSource;
@@ -10466,6 +10485,7 @@ function HtmlViewer({
     const s = routingHtmlSource;
     return s != null && htmlNeedsRedirectGuard(s);
   }, [passiveLargeHtmlPreview, routingHtmlSource]);
+  const needsPersistentStorage = Boolean(routingHtmlSource && /\blocalStorage\b/.test(routingHtmlSource));
   const urlDocumentGuardsAvailable =
     liveHtml === undefined && file.size <= PREVIEW_URL_GUARD_MAX_HTML_BYTES;
   // Set by the injected guard's `od:redirect-loop-blocked` postMessage. The
@@ -10602,9 +10622,11 @@ function HtmlViewer({
     // Preserve the old URL-load behavior for ordinary passive documents. Only
     // request a guard when the source heuristic says this artifact needs it;
     // this avoids suppressing authored focus/navigation in unrelated pages.
-    if (needsSandboxShim && !needsPowered) query.push('odPreviewBridge=sandbox');
-    if (needsFocusGuard && !needsPowered) query.push('odPreviewBridge=focus');
-    if (needsRedirectGuard && !needsPowered) query.push('odPreviewBridge=redirect');
+    // Keep guards on the ordinary URL fallback if isolation is unavailable.
+    // The powered URL below uses only BASE_PREVIEW_BRIDGE_QUERY.
+    if (needsSandboxShim) query.push('odPreviewBridge=sandbox');
+    if (needsFocusGuard) query.push('odPreviewBridge=focus');
+    if (needsRedirectGuard) query.push('odPreviewBridge=redirect');
     return query.join('&');
   }, [needsFocusGuard, needsPowered, needsRedirectGuard, needsSandboxShim]);
   const [urlSelectionBridgeReady, setUrlSelectionBridgeReady] = useState(false);
@@ -10618,8 +10640,9 @@ function HtmlViewer({
     urlModeBridge,
     inspectMode,
     drawMode: drawOverlayOpen,
-    forceInline: forceInline && !needsPowered,
+    forceInline: (forceInline || needsPersistentStorage) && !needsPowered,
     needsSandboxShim: needsSandboxShim && !needsPowered,
+    needsLocalInteractionBridge: needsLocalInteractionBridge && !needsPowered,
     // Daemon guards wrap the settled on-disk response. Streaming/in-memory
     // HTML has no matching URL representation, so keep it on srcDoc until it
     // lands on disk instead of showing stale bytes from the raw route.
@@ -10655,6 +10678,12 @@ function HtmlViewer({
       if (srcDocPreviewIframeRef.current) unbindMotionPreviewActivity(srcDocPreviewIframeRef.current);
       srcDocNavigationCommittedRef.current = null;
       srcDocContentReadyRef.current = null;
+    }
+    // Reset before the shell can announce readiness. Its ready message may
+    // precede the first load; resetting in onLoad would activate it twice.
+    if (frame && srcDocFrameDedupeResetForRef.current !== frame) {
+      srcDocFrameDedupeResetForRef.current = frame;
+      activatedSrcDocTransportHtmlRef.current = null;
     }
     srcDocPreviewIframeRef.current = frame;
     if (frame) bindMotionPreviewActivity(frame);
@@ -10853,7 +10882,7 @@ function HtmlViewer({
   // Hold the iframe URL still (it carries file.mtime) while the user is mid
   // annotation/edit, mirroring the source freeze above. Otherwise a
   // background file change bumps mtime → basePreviewSrcUrl → a URL-load
-  // reload right under an active mark/comment/edit/inspect. Captured once at
+  // reload right under an active mark/edit/inspect. Captured once at
   // mode entry via a ref and released on exit, so the deferred reload lands
   // exactly once when the user is done.
   const interactivePreviewModeActive = annotationFreezeActive || manualEditMode;
@@ -10980,6 +11009,13 @@ function HtmlViewer({
     setPreviewSrcUrl(effectiveBasePreviewSrcUrl);
     setUrlSelectionBridgeReady(false);
   }, [effectiveBasePreviewSrcUrl, filesRefreshPending, previewSrcCarriesCurrentRefresh]);
+  useEffect(() => {
+    if (!workspaceActive || mode !== 'preview' || (!useUrlLoadPreview && previewSource === null)) return;
+    const frame = useUrlLoadPreview ? urlPreviewIframeRef.current : srcDocPreviewIframeRef.current;
+    if (!frame) return;
+    return trackVisiblePreview({ iframe: frame, renderMode: useUrlLoadPreview ? 'url_load' : 'srcdoc',
+      artifactKind: handoffArtifactKind ?? artifactKindToTracking({ fileKind: file.kind ?? null }) ?? null });
+  }, [workspaceActive, mode, useUrlLoadPreview, projectId, file.name, file.kind, handoffArtifactKind, reloadKey, activePreviewSrcUrl, previewSource]);
   const previewObservabilitySeenRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     previewObservabilitySeenRef.current = new Set();
@@ -10987,11 +11023,11 @@ function HtmlViewer({
   useEffect(() => {
     if (mode !== 'preview') return undefined;
     return subscribePreviewIframeMessages(({ source: messageSource, data }) => {
-      if (!workspaceActiveRef.current) return;
+      if (!workspaceActiveRef.current || document.visibilityState !== 'visible') return;
       const activeFrame = useUrlLoadPreview
         ? urlPreviewIframeRef.current
         : srcDocPreviewIframeRef.current;
-      if (!activeFrame || messageSource !== activeFrame.contentWindow) return;
+      if (!activeFrame || !isPreviewFrameVisible(activeFrame) || messageSource !== activeFrame.contentWindow) return;
       reportPreviewIframeMessage(data, {
         surface: 'artifact_preview',
         renderMode: useUrlLoadPreview ? 'url_load' : 'srcdoc',
@@ -11064,7 +11100,7 @@ function HtmlViewer({
       if (cancelled) return;
       setPowered({
         resolved: true,
-        url: base ? `${base}?v=${Math.round(file.mtime)}&r=${reloadKey}&${previewBridgeQuery}` : null,
+        url: base ? `${base}?v=${Math.round(file.mtime)}&r=${reloadKey}&${BASE_PREVIEW_BRIDGE_QUERY}` : null,
       });
     });
     return () => {
@@ -11231,6 +11267,7 @@ function HtmlViewer({
     effectiveDeck ? 'deck' : 'html',
     srcDocBaseHref,
   ].join('\0');
+  const previewStorageScopeKey = previewStorageKey(sourceAuthorizationScopeKey, projectId, file.name);
   const candidateSrcDocTransport = useMemo(
     () => {
       const sourceFingerprint = previewSource === null
@@ -11253,6 +11290,7 @@ function HtmlViewer({
         generation,
         srcDoc: previewSource ? buildSrcdoc(previewSource, {
           motionPreview: true,
+          previewStorage: Boolean(previewStorageScopeKey),
           deck: effectiveDeck,
           baseHref: srcDocBaseHref,
           initialSlideIndex: htmlPreviewSlideState.get(previewStateKey)?.active ?? 0,
@@ -11286,6 +11324,7 @@ function HtmlViewer({
       previewSource,
       effectiveDeck,
       srcDocTransportIdentity,
+      previewStorageScopeKey,
       previewStateKey,
       reloadKey,
       transportPreviewMeasurementDocumentEpoch,
@@ -11309,6 +11348,16 @@ function HtmlViewer({
   const srcDoc = srcDocTransport.srcDoc;
   const expectedSrcDocTransportGenerationRef = useRef(srcDocTransportGeneration);
   expectedSrcDocTransportGenerationRef.current = srcDocTransportGeneration;
+  useEffect(() => {
+    const onStorage = (event: MessageEvent) => {
+      savePreviewStorageMessage(event, srcDocPreviewIframeRef.current?.contentWindow ?? null,
+        expectedSrcDocTransportGenerationRef.current, previewStorageScopeKey);
+      savePreviewStorageMessage(event, presentOverlayRef.current?.querySelector('iframe')?.contentWindow ?? null,
+        `${expectedSrcDocTransportGenerationRef.current}:presentation`, previewStorageScopeKey);
+    };
+    window.addEventListener('message', onStorage);
+    return () => window.removeEventListener('message', onStorage);
+  }, [previewStorageScopeKey]);
   const readySrcDocTransportRef = useRef<{
     frame: HTMLIFrameElement;
     generation: string;
@@ -11461,6 +11510,11 @@ function HtmlViewer({
       hideDeckChrome: effectiveDeck,
       deckClickNavigation: effectiveDeck,
       previewFocusGuard: true,
+      previewStorage: Boolean(previewStorageScopeKey),
+      previewStorageSeed: previewStorageScopeKey ? {
+        generation: `${srcDocTransportGeneration}:presentation`,
+        values: readPreviewStorage(previewStorageScopeKey),
+      } : undefined,
     }) : ''),
     [
       deckVisualSource,
@@ -11470,6 +11524,8 @@ function HtmlViewer({
       file.name,
       previewStateKey,
       latestSrcDocPreviewBaseHref,
+      previewStorageScopeKey,
+      srcDocTransportGeneration,
     ],
   );
   // Per-slide thumbnail documents are built lazily by DeckThumbnailRail, one
@@ -11559,7 +11615,8 @@ function HtmlViewer({
     srcDocRecoveryAttemptRef.current = { generation, activationEpoch };
     const ready = readySrcDocTransportRef.current;
     cancelPendingSrcDocTransport();
-    reportPreviewTransportRecovery({
+    frame?.dispatchEvent(new Event('od:preview-transport-recovery'));
+    if (frame && isPreviewFrameVisible(frame)) reportPreviewTransportRecovery({
       surface: 'artifact_preview',
       renderMode: 'srcdoc',
       artifactId: anonymizeArtifactId({ projectId, fileName: file.name }),
@@ -12061,6 +12118,7 @@ function HtmlViewer({
   // visibility swap rather than a remount and reload.
   const useLazySrcDocTransport =
     usesPersistentSrcDocTransport
+    || (needsPersistentStorage && !needsPowered)
     || srcDocRecoveryGeneration === srcDocTransportGeneration
     || (!manualEditRequiresSrcDoc && !captureModeActive && useUrlLoadPreview && !srcDocMaterialized);
   // Park on a static "loop detected" document once the guard reports a runaway
@@ -12165,7 +12223,7 @@ function HtmlViewer({
     : appendResourceQuery(selectedUrlFrameSrc, 'odMotionPreview=1');
   const urlFrameSandbox = usePoweredPreview
     ? POWERED_PREVIEW_SANDBOX
-    : 'allow-scripts allow-downloads';
+    : HTML_PREVIEW_SANDBOX;
   const urlFrameAllow = usePoweredPreview ? POWERED_PREVIEW_ALLOW : undefined;
   // Arm the first-load overlay only for URL-load previews this pane has never
   // painted (per keep-alive key, so tab revisits and pooled re-attaches skip
@@ -12233,12 +12291,14 @@ function HtmlViewer({
       type: 'od:srcdoc-transport-activate',
       html: srcDocActivationContent,
       generation: srcDocTransportGeneration,
+      previewStorage: previewStorageScopeKey ? readPreviewStorage(previewStorageScopeKey) : undefined,
     }, '*');
     activatedSrcDocTransportHtmlRef.current = srcDocActivationContent;
     return true;
   }, [
     boardMode,
     srcDocActivationContent,
+    previewStorageScopeKey,
     srcDocMaterialized,
     srcDocShellReady,
     srcDocTransportGeneration,
@@ -12260,11 +12320,13 @@ function HtmlViewer({
       type: 'od:srcdoc-transport-activate',
       html: srcDocActivationContent,
       generation: srcDocTransportGeneration,
+      previewStorage: previewStorageScopeKey ? readPreviewStorage(previewStorageScopeKey) : undefined,
     }, '*');
     activatedSrcDocTransportHtmlRef.current = srcDocActivationContent;
     return true;
   }, [
     srcDocActivationContent,
+    previewStorageScopeKey,
     srcDocMaterialized,
     srcDocTransportGeneration,
     useLazySrcDocTransport,
@@ -12278,9 +12340,10 @@ function HtmlViewer({
       type: 'od:srcdoc-transport-activate',
       html: srcDocActivationContent,
       generation: srcDocTransportGeneration,
+      previewStorage: previewStorageScopeKey ? readPreviewStorage(previewStorageScopeKey) : undefined,
     }, '*');
     return true;
-  }, [srcDocActivationContent, srcDocTransportGeneration]);
+  }, [srcDocActivationContent, srcDocTransportGeneration, previewStorageScopeKey]);
   function verifyLoadedSrcDocTransport(target: HTMLIFrameElement | null) {
     if (!target || target !== srcDocPreviewIframeRef.current) return;
     const generation = srcDocTransportGeneration;
@@ -12660,26 +12723,18 @@ function HtmlViewer({
     && (resolveOwnerCommentAnchor(selectedLocationComment, liveCommentTargets, collab.publishedVersion ?? undefined).state === 'lost'
       || (missingCommentLocation?.commentId === selectedLocationComment.id && missingCommentLocation.previewKey === commentTargetsKey
         && missingCommentLocation.intent === commentLocationIntent)) ? selectedLocationComment.id : null;
-  const shareComposerComment = currentActiveComposerComment();
-  // A lost row's unchanged saved prefill is not unsaved work.
-  const unchangedLostCommentPrefill = !activeCommentTarget && lostSelectedCommentId !== null
-    && shareComposerComment?.id === lostSelectedCommentId
-    && commentDraft === shareComposerComment.note;
-  const shareDraftUnsettled = !unchangedLostCommentPrefill && (
-    Boolean(commentDraft.trim()) || Boolean(shareComposerComment && (activeCommentTarget || lostSelectedCommentId)
-      && commentDraft !== shareComposerComment.note)
-  );
   const guardShareSource = workspaceActive && !viewerOnly && Boolean(workspaceContext?.permissions.canWriteSyncedFiles)
     && !needsPowered && !passiveLargeHtmlPreview && liveHtml === undefined;
   const shareSourceSettled = !streaming && !manualEditMode && !manualEditDraftDirty
     && !manualEditSaving && !manualEditEntryHandoffPending && !manualEditExitHandoffPending
     && !manualEditPendingStyleRef.current && !inspectMode && !savingInspect && !drawOverlayOpen
-    && source !== null && !versionModalOpen && !filesRefreshPending && !shareDraftUnsettled && !queuedBoardNotes.length && !boardImages.length
-    && !sendingBoardBatch && !_speakerNotesSaving && !publishingPublicFile;
+    // Publication reads saved disk contents. Comment drafts and preview
+    // navigation do not change those bytes and must not block publication.
+    && source !== null && !versionModalOpen
+    && !_speakerNotesSaving && !publishingPublicFile;
   const shareSourceInputKey = useMemo(() => JSON.stringify([
-    source, reloadKey, file.mtime, filesRefreshKey, commentDraft, queuedBoardNotes,
-    boardImages.map(image => [image.name, image.size, image.lastModified]), manualEditDraft, speakerNotesDraft, workspaceActive,
-  ]), [source, reloadKey, file.mtime, filesRefreshKey, commentDraft, queuedBoardNotes, boardImages, manualEditDraft, speakerNotesDraft, workspaceActive]);
+    source, reloadKey, file.mtime, filesRefreshKey, manualEditDraft, speakerNotesDraft, workspaceActive,
+  ]), [source, reloadKey, file.mtime, filesRefreshKey, manualEditDraft, speakerNotesDraft, workspaceActive]);
   const shareSourceGuard = useShareSourceGuard({ projectId, fileName: file.name,
     context: workspaceContext ?? null, inputKey: shareSourceInputKey, settled: shareSourceSettled });
   const commentIdentityFrameReady = commentTargetsReadyKey === commentTargetsKey
@@ -12690,6 +12745,7 @@ function HtmlViewer({
   const commentTargetReportRevisionRef = useRef(0);
   useEffect(() => {
     setLiveCommentTargets(new Map());
+    setStrokePoints([]);
   }, [commentTargetsKey]);
 
   // Mirror the bridge's `od:comment-targets` broadcast into
@@ -12755,6 +12811,7 @@ function HtmlViewer({
   }, [inspectMode, boardMode, file.name, commentTargetsKey, isOurPreviewIframeSource, isActivePreviewIframeSource, workspaceActive]);
 
   useEffect(() => {
+    commentReselectPendingRef.current = false;
     setActiveCommentTarget(null);
     setHoveredCommentTarget(null);
     setLiveCommentTargets(new Map());
@@ -12883,7 +12940,7 @@ function HtmlViewer({
           if (!current) return null;
           if (current.selectionKind === 'pod') return current;
           const updated = next.get(current.elementId);
-          if (!updated || !isValidCommentOverlayPosition(updated.position)) return null;
+          if (!updated || !isValidCommentOverlayPosition(updated.position)) return composerHoldsUnsentWorkRef.current ? current : null;
           return commentSnapshotEqual(current, updated) ? current : updated;
         });
         setHoveredCommentTarget((current) => {
@@ -12909,7 +12966,7 @@ function HtmlViewer({
           // A completed locate or a newer target index supersedes this failure.
           if (request.scrolled || request.reportRevision !== commentTargetReportRevisionRef.current) return;
           setMissingCommentLocation({ commentId: request.commentId, previewKey: request.previewKey, intent: commentLocationIntent });
-          setActiveCommentTarget(null);
+          if (!composerHoldsUnsentWorkRef.current) setActiveCommentTarget(null);
           setHoveredCommentTarget(null);
           return;
         }
@@ -13016,6 +13073,14 @@ function HtmlViewer({
           setHoveredCommentTarget(snapshot);
           return;
         }
+        if (commentReselectPendingRef.current) {
+          commentReselectPendingRef.current = false;
+          setActiveCommentTarget(snapshot);
+          setHoveredCommentTarget(snapshot);
+          setCommentSavedToast(null);
+          disarmComposerDiscard();
+          return;
+        }
         requestComposerRetarget(() => {
           setActiveCommentTarget(snapshot);
           setHoveredCommentTarget(snapshot);
@@ -13074,6 +13139,7 @@ function HtmlViewer({
     if (!workspaceActive || !boardMode || !activePreviewCommentId) return;
     const comment = previewComments.find(item => item.id === activePreviewCommentId && item.filePath === file.name);
     if (!comment || !ownerCommentNeedsLocation(comment, collab.enabled)) return;
+    if (composerHoldsUnsentWorkRef.current) return;
     setActiveCommentTarget(null);
     setHoveredCommentTarget(null);
     if (commentTargetsReadyKey !== commentTargetsKey) return;
@@ -15235,6 +15301,7 @@ function HtmlViewer({
   }
 
   function clearBoardComposer() {
+    commentReselectPendingRef.current = false;
     disarmComposerDiscard();
     setActiveCommentTarget(null);
     setHoveredCommentTarget(null);
@@ -15456,7 +15523,6 @@ function HtmlViewer({
 
   async function sendBoardBatch() {
     if (!activeCommentTarget || !onSendBoardCommentAttachments) return;
-    if (activeCommentTarget.elementId.startsWith('cmt:') && !commentIdentityFrameReady) return;
     const existingComment = currentActiveComposerComment();
     const sendingUnchangedSavedComment = Boolean(
       existingComment
@@ -15467,8 +15533,10 @@ function HtmlViewer({
     if (existingComment && sendingUnchangedSavedComment) {
       setSendingBoardBatch(true);
       try {
+        const checked = await currentCommentSaveTarget(activeCommentTarget);
+        if (!checked) return;
         const result = await onSendBoardCommentAttachments(
-          commentsToAttachments([existingComment]),
+          commentsToAttachments([{ ...existingComment, ...withDeckSlideIndex(targetFromSnapshot(checked)) }]),
         );
         if (!commentSendCompleted(result, existingComment.id)) return;
         clearBoardComposer();
@@ -15482,9 +15550,11 @@ function HtmlViewer({
     if (nextNotes.length === 0 && boardImages.length === 0) return;
     setSendingBoardBatch(true);
     try {
+      const checked = await currentCommentSaveTarget(activeCommentTarget);
+      if (!checked) return;
       const existingAttachments = currentActiveComposerAttachments();
       const attachments = buildBoardCommentAttachments({
-        target: withDeckSlideIndex(targetFromSnapshot(activeCommentTarget)),
+        target: withDeckSlideIndex(targetFromSnapshot(checked)),
         notes: nextNotes,
         includeImageOnly: boardImages.length > 0,
         imageAttachmentCount: boardImages.length,
@@ -15514,15 +15584,31 @@ function HtmlViewer({
     }
   }
 
+  async function currentCommentSaveTarget(snapshot: PreviewCommentSnapshot) {
+    // Free-position and area notes do not refer to one DOM element.
+    if (snapshot.elementId.startsWith('pin-') || snapshot.elementId.startsWith('file-comment-') || snapshot.selectionKind === 'pod') return snapshot;
+    const checked = await validateCommentSaveTarget(iframeRef.current, snapshot, () =>
+      useUrlLoadPreview ? `url:${iframeRef.current?.src ?? ''}`
+        : `srcdoc:${expectedSrcDocTransportGenerationRef.current}`);
+    if (checked === 'missing' || checked === 'unavailable') {
+      commentReselectPendingRef.current = checked === 'missing';
+      setCommentSavedToast(t(checked === 'missing' ? 'comment.saveTargetMissing' : 'comment.savePreviewNotReady'));
+      return null;
+    }
+    commentReselectPendingRef.current = false;
+    return checked;
+  }
+
   async function savePersistentComment() {
     if (!activeCommentTarget || !onSavePreviewComment) return;
-    if (activeCommentTarget.elementId.startsWith('cmt:') && !commentIdentityFrameReady) return;
     // Allow saving when there is text OR an attached image (image-only notes).
     if (!commentDraft.trim() && boardImages.length === 0 && currentActiveComposerAttachments().length === 0) return;
     const isFreePin = activeCommentTarget.elementId.startsWith('pin-');
     setSendingBoardBatch(true);
     try {
-      const target = withDeckSlideIndex(targetFromSnapshot(activeCommentTarget));
+      const checked = await currentCommentSaveTarget(activeCommentTarget);
+      if (!checked) return;
+      const target = withDeckSlideIndex(targetFromSnapshot(checked));
       const saved = await onSavePreviewComment(
         target,
         commentDraft.trim(),
@@ -15545,24 +15631,25 @@ function HtmlViewer({
 
   async function savePanelComment(note: string) {
     if (!onSavePreviewComment) return false;
-    if (activeCommentTarget?.elementId.startsWith('cmt:') && !commentIdentityFrameReady) return false;
     const cleanNote = note.trim();
     if (!cleanNote) return false;
-    const idSeed = Date.now().toString(36);
-    const target: PreviewCommentTarget = activeCommentTarget
-      ? targetFromSnapshot(activeCommentTarget)
-      : {
-          filePath: file.name,
-          elementId: `file-comment-${idSeed}-${Math.floor(Math.random() * 1e6).toString(36)}`,
-          selector: 'html',
-          label: file.name,
-          text: '',
-          position: { x: 0, y: 0, width: 0, height: 0 },
-          htmlHint: '',
-          selectionKind: 'element',
-        };
     setSendingBoardBatch(true);
     try {
+      const checked = activeCommentTarget ? await currentCommentSaveTarget(activeCommentTarget) : null;
+      if (activeCommentTarget && !checked) return false;
+      const idSeed = Date.now().toString(36);
+      const target: PreviewCommentTarget = checked
+        ? targetFromSnapshot(checked)
+        : {
+            filePath: file.name,
+            elementId: `file-comment-${idSeed}-${Math.floor(Math.random() * 1e6).toString(36)}`,
+            selector: 'html',
+            label: file.name,
+            text: '',
+            position: { x: 0, y: 0, width: 0, height: 0 },
+            htmlHint: '',
+            selectionKind: 'element',
+          };
       const saved = await onSavePreviewComment(target, cleanNote, false);
       if (saved) {
         setCommentSavedToast(t('chat.comments.savedToast'));
@@ -17957,6 +18044,7 @@ function HtmlViewer({
                             : `artifact-preview-frame-retained-${file.name}`}
                           data-od-render-mode="url-load"
                           data-od-active={mode === 'preview' && useUrlLoadPreview ? 'true' : 'false'}
+                          data-od-motion-muted={motionPreviewMuted ? 'true' : 'false'}
                           data-od-motion-active={workspaceActive && mode === 'preview' && useUrlLoadPreview ? 'true' : 'false'}
                           data-od-handoff-visible={keepUrlPaintedDuringManualEditEntry ? 'true' : undefined}
                           data-od-handoff-pending={keepSrcDocPaintedDuringManualEditExit ? 'true' : undefined}
@@ -17970,7 +18058,11 @@ function HtmlViewer({
                           onLoad={() => {
                             const frame = urlPreviewIframeRef.current;
                             markManualEditUrlStandbyReady(frame);
-                            if (useUrlLoadPreview) iframeRef.current = frame;
+                            if (useUrlLoadPreview) {
+                              iframeRef.current = frame;
+                              // A new document cannot finish the old in-progress lasso.
+                              setStrokePoints([]);
+                            }
                             if (frame) frame.dataset.odLoadedSrc = frame.getAttribute('src') ?? '';
                             if (frame) {
                               frame.dataset.odLoadedPreviewEpoch =
@@ -18004,6 +18096,7 @@ function HtmlViewer({
                             : `artifact-preview-frame-retained-${file.name}`}
                           data-od-render-mode="url-load"
                           data-od-active={mode === 'preview' && useUrlLoadPreview ? 'true' : 'false'}
+                          data-od-motion-muted={motionPreviewMuted ? 'true' : 'false'}
                           data-od-motion-active={workspaceActive && mode === 'preview' && useUrlLoadPreview ? 'true' : 'false'}
                           data-od-handoff-visible={keepUrlPaintedDuringManualEditEntry ? 'true' : undefined}
                           data-od-handoff-pending={keepSrcDocPaintedDuringManualEditExit ? 'true' : undefined}
@@ -18017,7 +18110,11 @@ function HtmlViewer({
                           onLoad={() => {
                             const frame = urlPreviewIframeRef.current;
                             markManualEditUrlStandbyReady(frame);
-                            if (useUrlLoadPreview) iframeRef.current = frame;
+                            if (useUrlLoadPreview) {
+                              iframeRef.current = frame;
+                              // A new document cannot finish the old in-progress lasso.
+                              setStrokePoints([]);
+                            }
                             if (frame) frame.dataset.odLoadedSrc = frame.getAttribute('src') ?? '';
                             if (frame) {
                               frame.dataset.odLoadedPreviewEpoch =
@@ -18055,13 +18152,14 @@ function HtmlViewer({
                           : `artifact-preview-frame-srcdoc-retained-${file.name}`}
                         data-od-render-mode="srcdoc"
                         data-od-active={mode === 'preview' && !useUrlLoadPreview ? 'true' : 'false'}
+                        data-od-motion-muted={motionPreviewMuted ? 'true' : 'false'}
                         data-od-motion-active={workspaceActive && mode === 'preview' && !useUrlLoadPreview ? 'true' : 'false'}
                         data-od-handoff-visible={keepSrcDocPaintedDuringManualEditExit ? 'true' : undefined}
                         data-od-handoff-pending={keepUrlPaintedDuringManualEditEntry ? 'true' : undefined}
                         aria-hidden={workspaceActive && mode === 'preview' && !useUrlLoadPreview ? undefined : true}
                         tabIndex={workspaceActive && mode === 'preview' && !useUrlLoadPreview ? 0 : -1}
                         title={file.name}
-                        sandbox="allow-scripts allow-downloads"
+                        sandbox={HTML_PREVIEW_SANDBOX}
                         src={srcDocTransportUrl ?? 'about:blank'}
                         srcDoc={srcDocTransportUrl ? undefined : srcDocTransportContent}
                         onLoad={() => {
@@ -18079,40 +18177,6 @@ function HtmlViewer({
                               transportPreviewMeasurementDocumentEpoch;
                           }
                           if (!useUrlLoadPreview) beginDesktopPreviewContentMeasurementGeneration(frame);
-                          // Reset the activation dedupe exactly ONCE per
-                          // freshly mounted iframe DOM node, never on the
-                          // subsequent load events that the same node
-                          // emits during normal srcDoc rendering.
-                          //
-                          // The iframe's load event fires twice for one
-                          // successful activation: once when the lazy
-                          // transport shell HTML loads, and again when
-                          // our own document.open/write/close inside the
-                          // shell finishes. PR #2699 reset the dedupe on
-                          // every load so that switching
-                          // preview -> source -> preview (which remounts
-                          // this iframe as a fresh DOM node) would
-                          // re-activate the new shell. But resetting on
-                          // every load also re-activated on the SECOND
-                          // load of a non-remounted frame, which
-                          // re-triggered document.open/write/close, which
-                          // re-fired the load event, ad infinitum. The
-                          // dedupe ref oscillated between null and the
-                          // current srcDoc thousands of times per render
-                          // and each iteration restarted every CSS
-                          // animation from its `from` keyframe. Designs
-                          // using `animation-fill-mode: both` with
-                          // `from { opacity: 0 }` stayed at opacity 0
-                          // forever and the preview read as blank.
-                          // That is issue #2361.
-                          //
-                          // Tracking the last frame we reset for lets us
-                          // keep PR #2699's "remount after Source toggle"
-                          // fix while breaking the loop on plain renders.
-                          if (frame && srcDocFrameDedupeResetForRef.current !== frame) {
-                            srcDocFrameDedupeResetForRef.current = frame;
-                            activatedSrcDocTransportHtmlRef.current = null;
-                          }
                           if (useLazySrcDocTransport) setSrcDocShellReady(true);
                           const activatedTransport = activateLoadedSrcDocTransport(frame);
                           if (frame && activatedTransport) {
@@ -18472,16 +18536,18 @@ function HtmlViewer({
           {effectiveDeck || !useUrlLoadPreview ? (
             <iframe
               title="present"
-              sandbox="allow-scripts allow-downloads"
+              sandbox={HTML_PREVIEW_SANDBOX}
               data-od-render-mode="srcdoc"
-              srcDoc={effectiveDeck ? presentationSrcDoc : srcDoc}
+              srcDoc={presentationSrcDoc}
             />
           ) : (
             <iframe
               title="present"
-              sandbox="allow-scripts allow-downloads"
+              sandbox={urlFrameSandbox}
+              allow={urlFrameAllow}
+              data-od-powered={usePoweredPreview ? 'true' : undefined}
               data-od-render-mode="url-load"
-              src={activePreviewSrcUrl}
+              src={urlFrameSrc}
             />
           )}
           {/* The overlay covers the whole window, so this is the only exit the

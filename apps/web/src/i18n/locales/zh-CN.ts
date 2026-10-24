@@ -514,7 +514,7 @@ export const zhCN: Dict = {
   "settings.cloudCalloutButton": "登录 / 注册",
   "settings.modeApiMeta": "API 提供商",
   "settings.byokNoFileToolsNotice":
-    "BYOK 无法读写或修改项目文件；需要改代码时请使用本机 CLI。",
+    "BYOK 通过 OpenCode 读取、写入和编辑项目文件，需要已安装且可用的 OpenCode。",
   "settings.byokDraftNotice":
     "填写必填项后即可保存此提供商；当前配置将继续保持生效。",
   "settings.codeAgent": "代码代理",
@@ -826,8 +826,8 @@ export const zhCN: Dict = {
   "entry.tabConnectors": "连接器",
   "entry.openSettingsTitle": "设置",
   "entry.openSettingsAria": "打开设置",
-  "entry.discordLabel": "加入 Discord",
-  "entry.discordAria": "加入 Discord 社区，领取使用额度",
+  "entry.communityLabel": "加入飞书群",
+  "entry.communityAria": "加入 OpenDesign 飞书群",
   "entry.discordAriaWithOnline": "加入 OpenDesign Discord - {online}",
   "entry.discordOnlineLabel": "{count} 在线",
   "entry.xAria": "关注 @OpenDesignHQ，看新功能",
@@ -976,6 +976,7 @@ export const zhCN: Dict = {
   "workspaceTabs.pluginDetails": "插件详情",
   "workspaceTabs.marketplace": "插件市场",
   "homeHero.title": "让我们创建{word}",
+  "homeHero.titleUnselected": "你想创作什么？",
   "homeHero.titleWords": "原型,幻灯片,文档",
   "homeHero.subtitle": "好的作品，从这里开始",
   "homeHero.startWithTemplate": "从模板开始…",
@@ -1025,7 +1026,6 @@ export const zhCN: Dict = {
   "homeHero.loadingContext": "正在加载上下文…",
   "homeHero.noResults": "没有找到“{query}”的结果。",
   "homeHero.searchPrompt": "搜索文件、插件、技能、MCP 服务器和连接器。",
-  "homeHero.parameters": "{n} 个参数",
   "homeHero.details": "详情",
   "homeHero.toRun": "运行",
   "homeHero.forNewLine": "换行",
@@ -3256,7 +3256,7 @@ export const zhCN: Dict = {
     "选好设计系统再生成，结果会与品牌风格保持一致。",
   "designFiles.usefulInfoTip5":
     "没有想法？试试首页 Community 的插件模板，一键生成同款。",
-  "designFiles.usefulInfoTip6": "遇到问题或有建议？加入 Discord 和我们聊聊。",
+  "designFiles.usefulInfoTip6": "遇到问题或有建议？加入飞书群和我们聊聊。",
   "designFiles.usefulInfoTip7": "觉得好用？在 GitHub 给我们点个 Star。",
   "designFiles.usefulInfoTip8":
     "在 X 上关注 @OpenDesignHQ，第一时间了解新功能。",
@@ -5931,7 +5931,7 @@ export const zhCN: Dict = {
   'labs.title': "Open Design 实验室",
   'labs.itemAbout': "关于 {name}",
   'labs.navHint': "抢先体验尚未正式发布的能力。",
-  'labs.pageDesc': "抢先体验尚未正式发布的能力，通常已优于当前版本；随时关闭即可恢复现状。",
+  'labs.pageDesc': "抢先体验尚在探索中的功能。功能及可用范围可能随版本调整。",
   'labs.harnessName': "Design Harness",
   'labs.harnessHint': "开启后，下次生成将使用 OpenDesign 最新生成策略，生成效果更精美（内测中）",
   'labs.harnessTooltip': "开启后改用 Open Design 为设计场景专门打造的 agent harness，产物在版式、结构和完成度上会明显更好。",
@@ -5960,5 +5960,7 @@ export const zhCN: Dict = {
   'comment.unsentDiscardNotice': '有未发送的评论。再次点击将丢弃并切换。',
   'comment.anchorState.reanchored': '基于旧版本',
   'comment.anchorState.stale': '锚点可能已移动',
+  'comment.saveTargetMissing': '评论目标已不存在，请重新选择元素；草稿已保留。',
+  'comment.savePreviewNotReady': '预览正在刷新，草稿已保留，请在刷新完成后重试保存。',
   'comment.anchorState.lost': '锚点已丢失',
 };
