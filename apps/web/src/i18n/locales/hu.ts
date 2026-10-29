@@ -1,6 +1,10 @@
 import type { Dict } from '../types';
 
 export const hu: Dict = {
+  "fileViewer.publishFileContentUnavailable": "Néhány feltöltött fájl hiányzik, vagy nem felelt meg az integritásellenőrzésen. Próbáld újra.",
+  "fileViewer.publishFileConflict": "A közzététel vagy feltöltés állapota megváltozott. Frissítsd a megosztási panelt, majd próbáld újra.",
+  "fileViewer.publishFileWorkspaceLocked": "Ez a munkaterület zárolva van. Közzététel előtt állítsd helyre a hozzáférést.",
+
   "collab.contentUpdate.available": "Új felhőverzió",
   "collab.contentUpdate.updating": "Frissítés…",
   "collab.contentUpdate.askAgain": "Frissítési értesítések visszaállítása",
@@ -3341,11 +3345,12 @@ export const hu: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'A nyilvános hivatkozás közzétételéhez csapatmunkaterület szükséges. Válts csapatmunkaterületre, vagy tedd közzé a fájlt a Közzététel funkcióval.',
   'fileViewer.publishFileRequiresWorkspace': 'A megosztási linkhez bejelentkezett munkaterület szükséges. Jelentkezz be az OpenDesign Cloudba, vagy oszd meg a fájlt telepítéssel.',
-  'fileViewer.publishFileTooLarge': "A projekt meghaladja a 20 MiB megosztási korlátot. Csökkentsd a HTML és a hivatkozott erőforrások méretét, majd próbáld újra.",
+  "fileViewer.publishFileTooLarge": "A tartalom meghaladja a szerver megosztási korlátját. Csökkentsd a fájlok méretét, majd próbáld újra.",
   'fileViewer.publishFileEntryIndexConflict': "A(z) „{from}” a projekt gyökérkönyvtárában lévő index.html fájlra hivatkozik, amely ütközik a megosztott oldal közzétételi helyével. Nevezd át ezt az index.html fájlt (például erre: {name}), és frissítsd a hivatkozást, vagy magát az index.html fájlt oszd meg.",
   'fileViewer.copyFixForAgent': "Javítás másolása az ügynöknek",
   'fileViewer.copyFixForAgentFailed': "A másolás nem sikerült. Jelöld ki az alábbi utasítást, és másold ki kézzel.",
   "fileViewer.shareUpdateHint": "A fájlban új módosítások vannak. A látogatók még az előző verziót látják.",
+  "fileViewer.shareUpdatingLink": "Hivatkozás frissítése…",
   "fileViewer.shareUpdateLink": "Hivatkozás frissítése",
   "fileViewer.signInToUpdate": "Bejelentkezés a frissítéshez",
   "fileViewer.signInToShare": "Bejelentkezés a megosztáshoz",
@@ -4230,6 +4235,9 @@ export const hu: Dict = {
   'notify.failureTitle': 'A feladat meghiúsult',
   'notify.successBody': 'Egy kör befejeződött.',
   'notify.failureBody': 'A feladat hibával ért véget.',
+  'notify.needsReplyBody': "A válaszodra vár",
+  'notify.runFailedBody': "A futtatás hibára futott",
+  'notify.newReplyBody': "Új válasz",
   'updater.available': 'Frissítés érhető el',
   'updater.activeRunsTitle': 'Az OpenDesign még dolgozik',
   'updater.activeRunsBody': '{count} aktív feladat még fut. Az újraindítás megszakítja őket.',
@@ -5465,6 +5473,10 @@ export const hu: Dict = {
   'chat.record.thinkingTokens': "{count} token",
   'chat.record.thoughts': "Gondolatmenet",
   'chat.record.done': "Kész",
+  'chat.record.turnElapsed': "Időtartam",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
+  'chat.record.turnStopped': "Leállítva",
   'chat.record.failedTurn': "A futtatás hibára futott",
   'chat.record.plan': "Terv · {count} lépés",
   'chat.record.planStep': "{current}. lépés / {total}",

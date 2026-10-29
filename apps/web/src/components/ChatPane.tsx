@@ -1,3 +1,4 @@
+import { withTaskPresentation, newerTaskDisplay, type PresentedChatMessage } from '../runtime/chat/task-presentation';
 import { reportExperienceEvent } from '../observability/experience-diagnostics';
 import { conversationMetaLabel } from '../runtime/chat/conversation-time';
 export { conversationMetaLabel } from '../runtime/chat/conversation-time';
@@ -140,6 +141,7 @@ import {
 import { Reconnect } from './chat/Reconnect';
 import { UserStatusCard } from './chat/UserStatusCard';
 import type { ChatReconnectView } from '../runtime/chat/reconnect-state';
+import { projectTurnAwaitingRunRecord } from '../runtime/chat/pending-disconnect';
 import { TodoCard } from './ToolCard';
 import type { BrandBrowserAssistConfirm } from './OdCard';
 import {
@@ -1065,15 +1067,25 @@ export function foldStrategyTaskTurns(messages: ChatMessage[]): FoldedChatMessag
   }
   const folded: FoldedChatMessage[] = [];
   const turnHeadIndexByTask = new Map<string, number>();
+  /*
+   * Tasks that saw a user message since their last Run — the next Run of such
+   * a task started from the user's reply (a submitted question form), not from
+   * the daemon auto-continuing. See `done_key.afterUserReply`.
+   */
+  const repliedTasks = new Set<string>();
   for (const message of messages) {
     const taskId = message.strategyTaskExecutionId;
     const runIndex = message.strategyTaskRunIndex ?? 0;
+    if (message.role === 'user') {
+      for (const id of turnHeadIndexByTask.keys()) repliedTasks.add(id);
+    }
     if (message.role !== 'assistant' || !taskId) {
       folded.push(message);
       continue;
     }
     if (runIndex === 0 || !turnHeadIndexByTask.has(taskId)) {
       turnHeadIndexByTask.set(taskId, folded.length);
+      repliedTasks.delete(taskId);
       folded.push({ ...message, events: stampRunSpan(message) });
       continue;
     }
@@ -1090,6 +1102,7 @@ export function foldStrategyTaskTurns(messages: ChatMessage[]): FoldedChatMessag
       folded.push(message);
       continue;
     }
+    const afterUserReply = repliedTasks.delete(taskId);
     const headIndex = turnHeadIndexByTask.get(taskId)!;
     const head = folded[headIndex]!;
     const headContent = head.content ?? '';
@@ -1101,7 +1114,7 @@ export function foldStrategyTaskTurns(messages: ChatMessage[]): FoldedChatMessag
       content: tailContent
         ? `${headContent}${separator}${tailContent}`
         : headContent,
-      events: [...(head.events ?? []), ...stampRunSpan(message)],
+      events: [...(head.events ?? []), ...stampRunSpan(message, afterUserReply)],
       // Preserve the final physical Run's scope for completion checks while
       // retaining the full history for display. Live rows may already contain
       // predecessors, tracked by these same offsets in ProjectView.
@@ -1117,6 +1130,7 @@ export function foldStrategyTaskTurns(messages: ChatMessage[]): FoldedChatMessag
       // internal step, not the turn ending.
       runId: message.runId ?? head.runId,
       runStatus: message.runStatus ?? head.runStatus,
+      taskDisplay: newerTaskDisplay(head.taskDisplay, message.taskDisplay),
       // Completion belongs to the final physical Run, including false or
       // absent legacy values. Never inherit the planning Run's verdict.
       strategyTaskDelivered: message.strategyTaskDelivered,
@@ -1141,16 +1155,20 @@ export function foldStrategyTaskTurns(messages: ChatMessage[]): FoldedChatMessag
  * existed has no marker to stamp. Both simply keep today's behaviour — the
  * renderer treats an absent span as "unknown" and falls back to the turn's.
  */
-function stampRunSpan(message: ChatMessage): NonNullable<ChatMessage['events']> {
+function stampRunSpan(
+  message: ChatMessage,
+  afterUserReply = false,
+): NonNullable<ChatMessage['events']> {
   const events = message.events ?? [];
   const startedAt = message.startedAt ?? message.createdAt;
-  if (startedAt == null && message.endedAt == null) return events;
+  if (startedAt == null && message.endedAt == null && !afterUserReply) return events;
   return events.map((event) => (
     event.kind === 'done_key'
       ? {
         ...event,
         ...(startedAt != null ? { runStartedAt: startedAt } : {}),
         ...(message.endedAt != null ? { runEndedAt: message.endedAt } : {}),
+        ...(afterUserReply ? { afterUserReply: true } : {}),
       }
       : event
   ));
@@ -1464,10 +1482,19 @@ export function ChatPane({
   const { workspaceContext } = useProjectCollabContext();
   const { t, locale } = useI18n();
   const analytics = useAnalytics();
+  const previousTaskPresentation = useRef<PresentedChatMessage[]>([]);
   const displayMessages = useMemo(
-    () => foldStrategyTaskTurns(
-      messages.filter((message) => !shouldHideEmptyBrandAssistantMessage(message, projectMetadata)),
-    ),
+    () => {
+      const presented = withTaskPresentation(foldStrategyTaskTurns(
+        messages
+          .filter((message) => !shouldHideEmptyBrandAssistantMessage(message, projectMetadata))
+          // A lost stream has no Run verdict yet. Project it before task
+          // aggregation so the merged process does not freeze as failed.
+          .map(projectTurnAwaitingRunRecord),
+      ), previousTaskPresentation.current);
+      previousTaskPresentation.current = presented;
+      return presented;
+    },
     [messages, projectMetadata],
   );
   /**
@@ -2432,9 +2459,9 @@ export function ChatPane({
    * 这一轮**确实到了终态失败**。
    *
    * `retryAssistant` 本身就是这个判据:它走
-   * `isRetryableAssistantTerminalFailure`,既认进程级 `runStatus:'failed'`,
-   * 也认「进程成了、东西没交出来」的 `no_result` / `delivery_failed` ——
-   * 恢复入口这一族本来就共用它当锚点,兜底卡没有理由另立一套。
+   * `isRetryableAssistantTerminalFailure`,只认运行记录的 `runStatus:'failed'`
+   * (P0-24:产物有没有交出来不改变本轮状态)—— 恢复入口这一族本来就共用它当锚点,
+   * 兜底卡没有理由另立一套。
    */
   const turnEndedInTerminalFailure = !!retryAssistant && !failedTurnIsAnEmptyResponse;
   const cardDescription = resolveRunErrorCardDescription({
@@ -5395,6 +5422,8 @@ function ChatRows({
     () => previousTodosByAssistantMessageId(messages),
     [messages],
   );
+  const taskRecordContext = useMemo(() => ({mediaTasksByRunId,previousTodosByMessageId}),
+    [mediaTasksByRunId,previousTodosByMessageId]);
   const assistantRoleByMessageId = useMemo(() => {
     const byMessageId = new Map<string, boolean>();
     let previousAssistantIdentity: string | null = null;
@@ -5452,6 +5481,8 @@ function ChatRows({
     const assistantRow = (
       <AssistantMessage
         message={m}
+        taskPresentation={(m as PresentedChatMessage).taskPresentation}
+        taskRecordContext={(m as PresentedChatMessage).taskPresentation?.owner ? taskRecordContext : undefined}
         streaming={messageStreaming}
         projectId={projectId}
         projectKind={projectKindForTracking}

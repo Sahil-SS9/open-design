@@ -1,6 +1,10 @@
 import type { Dict } from '../types';
 
 export const fa: Dict = {
+  "fileViewer.publishFileContentUnavailable": "برخی فایل‌های بارگذاری‌شده موجود نیستند یا بررسی صحت آن‌ها ناموفق بوده است. دوباره تلاش کنید.",
+  "fileViewer.publishFileConflict": "وضعیت انتشار یا بارگذاری تغییر کرده است. پنل اشتراک‌گذاری را تازه‌سازی کنید و دوباره تلاش کنید.",
+  "fileViewer.publishFileWorkspaceLocked": "این فضای کاری قفل است. پیش از انتشار، دسترسی به فضای کاری را بازیابی کنید.",
+
   "collab.contentUpdate.available": "نسخه جدید ابری موجود است",
   "collab.contentUpdate.updating": "در حال به‌روزرسانی…",
   "collab.contentUpdate.askAgain": "فعال‌کردن دوباره اعلان‌های به‌روزرسانی",
@@ -3352,11 +3356,12 @@ export const fa: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'انتشار پیوند عمومی به فضای کاری تیمی نیاز دارد. به یک فضای کاری تیمی بروید یا این فایل را با «استقرار» منتشر کنید.',
   'fileViewer.publishFileRequiresWorkspace': 'ایجاد پیوند اشتراک‌گذاری نیازمند ورود به فضای کاری است. به OpenDesign Cloud وارد شوید یا این فایل را از طریق استقرار به اشتراک بگذارید.',
-  'fileViewer.publishFileTooLarge': "این پروژه از سقف اشتراک‌گذاری 20 MiB بیشتر است. حجم HTML و منابع ارجاع‌شده را کاهش دهید و دوباره تلاش کنید.",
+  "fileViewer.publishFileTooLarge": "محتوا از محدودیت اشتراک‌گذاری سرور فراتر رفته است. حجم فایل‌ها را کاهش دهید و دوباره تلاش کنید.",
   'fileViewer.publishFileEntryIndexConflict': "«{from}» به فایل index.html در ریشهٔ پروژه ارجاع می‌دهد که با محل انتشار صفحهٔ اشتراکی تداخل دارد. نام آن index.html را تغییر دهید (مثلاً به {name}) و ارجاع را به‌روزرسانی کنید، یا خود index.html را به اشتراک بگذارید.",
   'fileViewer.copyFixForAgent': "کپی راه‌حل برای عامل",
   'fileViewer.copyFixForAgentFailed': "کپی انجام نشد. دستورالعمل زیر را انتخاب کرده و دستی کپی کنید.",
   "fileViewer.shareUpdateHint": "فایل تغییرات جدیدی دارد. بازدیدکنندگان هنوز نسخهٔ قبلی را می‌بینند.",
+  "fileViewer.shareUpdatingLink": "در حال به‌روزرسانی پیوند…",
   "fileViewer.shareUpdateLink": "به‌روزرسانی پیوند",
   "fileViewer.signInToUpdate": "ورود برای به‌روزرسانی",
   "fileViewer.signInToShare": "ورود برای اشتراک‌گذاری",
@@ -4193,6 +4198,9 @@ export const fa: Dict = {
   'notify.failureTitle': 'وظیفه ناموفق بود',
   'notify.successBody': 'یک نوبت به پایان رسید.',
   'notify.failureBody': 'وظیفه با خطا پایان یافت.',
+  'notify.needsReplyBody': "منتظر پاسخ شماست",
+  'notify.runFailedBody': "اجرا ناموفق بود",
+  'notify.newReplyBody': "پاسخ جدید",
   'updater.available': 'به‌روزرسانی موجود است',
   'updater.activeRunsTitle': 'OpenDesign هنوز در حال کار است',
   'updater.activeRunsBody': '{count} کار فعال هنوز در حال اجراست. راه‌اندازی مجدد اکنون آن‌ها را متوقف می‌کند.',
@@ -5471,6 +5479,10 @@ export const fa: Dict = {
   'chat.record.thinkingTokens': "{count} توکن",
   'chat.record.thoughts': "روند تفکر",
   'chat.record.done': "انجام شد",
+  'chat.record.turnElapsed': "مدت",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
+  'chat.record.turnStopped': "متوقف شد",
   'chat.record.failedTurn': "اجرا ناموفق بود",
   'chat.record.plan': "برنامه · {count} مرحله",
   'chat.record.planStep': "مرحله {current} از {total}",

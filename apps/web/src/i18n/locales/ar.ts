@@ -1,6 +1,10 @@
 import type { Dict } from '../types';
 
 export const ar: Dict = {
+  "fileViewer.publishFileContentUnavailable": "بعض الملفات المرفوعة مفقودة أو لم تجتز فحوص سلامة المحتوى. أعد المحاولة.",
+  "fileViewer.publishFileConflict": "تغيّرت حالة النشر أو الرفع. حدّث لوحة المشاركة ثم أعد المحاولة.",
+  "fileViewer.publishFileWorkspaceLocked": "مساحة العمل مقفلة. استعد إمكانية الوصول إليها قبل النشر.",
+
   "collab.contentUpdate.available": "يتوفر إصدار سحابي جديد",
   "collab.contentUpdate.updating": "جارٍ التحديث…",
   "collab.contentUpdate.askAgain": "استعادة تنبيهات التحديث",
@@ -3352,11 +3356,12 @@ export const ar: Dict = {
 
   'fileViewer.publishFileRequiresTeam': 'يتطلب نشر رابط عام مساحة عمل جماعية. بدّل إلى مساحة عمل جماعية، أو استخدم النشر لإتاحة هذا الملف.',
   'fileViewer.publishFileRequiresWorkspace': 'يتطلب رابط المشاركة مساحة عمل مسجّلة الدخول. سجّل الدخول إلى OpenDesign Cloud أو شارك هذا الملف عبر النشر.',
-  'fileViewer.publishFileTooLarge': "يتجاوز هذا المشروع حد المشاركة البالغ 20 MiB. قلّل حجم HTML والموارد المشار إليها، ثم أعد المحاولة.",
+  "fileViewer.publishFileTooLarge": "يتجاوز المحتوى حد المشاركة على الخادم. قلّل أحجام الملفات ثم أعد المحاولة.",
   'fileViewer.publishFileEntryIndexConflict': "يشير «{from}» إلى ملف index.html في جذر المشروع، وهو يتعارض مع موضع نشر الصفحة المشارَكة. أعد تسمية ملف index.html هذا (مثلًا إلى {name}) وحدّث المرجع، أو شارك index.html نفسه.",
   'fileViewer.copyFixForAgent': "نسخ الإصلاح للوكيل",
   'fileViewer.copyFixForAgentFailed': "تعذّر النسخ. حدّد التعليمات أدناه وانسخها يدويًا.",
   "fileViewer.shareUpdateHint": "يحتوي الملف على تغييرات جديدة. لا يزال الزوار يرون الإصدار السابق.",
+  "fileViewer.shareUpdatingLink": "جارٍ تحديث الرابط…",
   "fileViewer.shareUpdateLink": "تحديث الرابط",
   "fileViewer.signInToUpdate": "سجّل الدخول للتحديث",
   "fileViewer.signInToShare": "سجّل الدخول للمشاركة",
@@ -4241,6 +4246,9 @@ export const ar: Dict = {
   'notify.failureTitle': 'فشلت المهمة',
   'notify.successBody': 'انتهت جولة.',
   'notify.failureBody': 'انتهت المهمة بخطأ.',
+  'notify.needsReplyBody': "يحتاج إلى ردك",
+  'notify.runFailedBody': "فشل التشغيل",
+  'notify.newReplyBody': "رد جديد",
   'updater.available': 'يتوفر تحديث',
   'updater.activeRunsTitle': 'لا يزال OpenDesign يعمل',
   'updater.activeRunsBody': 'لا تزال {count} مهام نشطة قيد التشغيل. ستؤدي إعادة التشغيل الآن إلى مقاطعتها.',
@@ -5476,6 +5484,10 @@ export const ar: Dict = {
   'chat.record.thinkingTokens': "{count} رمز",
   'chat.record.thoughts': "مسار التفكير",
   'chat.record.done': "تم",
+  'chat.record.turnElapsed': "استغرق",
+  'chat.record.elapsedSeconds': "{n}s",
+  'chat.record.elapsedMinutes': "{m}m {s}s",
+  'chat.record.turnStopped': "تم الإيقاف",
   'chat.record.failedTurn': "فشل التشغيل",
   'chat.record.plan': "الخطة · {count} خطوات",
   'chat.record.planStep': "الخطوة {current} من {total}",
