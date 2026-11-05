@@ -1,3 +1,4 @@
+import { openExternalUrl } from "../providers/registry";
 import { homeAutoSendIdentity, stableIdentityDigest, type HomeRequestConcurrencyRejection } from '../runtime/home-auto-send-identity';
 import { withLiveArtifactDeliveries } from '../runtime/live-artifact-delivery';
 import { readAmrRequestConcurrency } from '../runtime/amr-request-concurrency';
@@ -124,6 +125,7 @@ import type {
   TrackingRunRecoveryActionType,
 } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
+import { useWorkspaceContentView } from '../analytics/use-workspace-content-view';
 import { savedCommentIds } from '@open-design/contracts/analytics';
 import { observeAnalytics } from '../analytics/observe';
 import {
@@ -2508,6 +2510,13 @@ export function ProjectView({
     projectVisibility: projectWorkspaceVisibility(projectWorkspaceScopeState.scope),
     presenceFilePath: project?.metadata?.entryFile ?? null,
   });
+  useWorkspaceContentView({
+    context: projectRunWorkspaceContext?.workspaceId === project.workspaceId ? projectRunWorkspaceContext : null,
+    pageName: 'project',
+    active: !projectReadsHeld && !projectCollab.materializationPending,
+    ready: !workspaceContextState.loading && !workspaceContextState.identityChangePending
+      && !workspaceContextState.failure && !projectWorkspaceScopeState.loading,
+  });
   // A Team-bound placeholder is safe to render and comment around, but its
   // empty tree is never a writer authority. Reuse the established viewer-only
   // gates for content/run/project mutations until the daemon's own status poll
@@ -3322,11 +3331,8 @@ export function ProjectView({
       resolvedDeviceId: getResolvedDeviceId(),
       installationId: config.installationId,
     });
-    window.open(
-      attributedAmrUrl(url, attribution, deviceId),
-      '_blank',
-      'noopener,noreferrer',
-    );
+    void openExternalUrl(
+      attributedAmrUrl(url, attribution, deviceId));
   }, [
     amrBalanceCardProfile,
     config.agentCliEnv?.amr?.OPEN_DESIGN_AMR_PROFILE,
@@ -15323,6 +15329,8 @@ export function ProjectView({
       {amrBalanceGateBlock?.dialog === 'upgrade' ? (
         <AmrBalanceDialog
           reason={amrBalanceGateBlock.reason}
+          projectId={project.id}
+          conversationId={amrBalanceGateBlock.conversationId}
           stage={amrBalanceGateBlock.stage}
           manualSendOnRecovery={amrBalanceGateBlock.reason === 'insufficient'}
           modelId={amrBalanceGateBlock.modelId}
